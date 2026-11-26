@@ -492,9 +492,11 @@ create_first_admin() {
 		ok "a platform admin already exists (more: docker compose exec core mira-core create-admin)"
 		return
 	fi
-	if [ -z "$ADMIN_EMAIL" ] && { : </dev/tty; } 2>/dev/null; then
+	# Ask only when a person is watching (output on a screen, also with curl | sudo bash) and
+	# never wait forever: scripts and CI have a terminal at times, but nobody to answer.
+	if [ -z "$ADMIN_EMAIL" ] && [ "$ON_SCREEN" -eq 1 ] && { : </dev/tty; } 2>/dev/null; then
 		printf '    E-mail address of the first administrator: ' >/dev/tty
-		read -r ADMIN_EMAIL </dev/tty || true
+		read -r -t 300 ADMIN_EMAIL </dev/tty || true
 	fi
 	if [ -z "$ADMIN_EMAIL" ]; then
 		warn "no administrator yet: run the installer again with --admin-email you@example.com"
@@ -514,7 +516,7 @@ create_first_admin() {
 	)
 	ok "tenant \"$COMPANY\" and platform admin $ADMIN_EMAIL created"
 	# the password goes to the screen and a root-only file, never into the install log
-	if { : >/dev/tty; } 2>/dev/null; then
+	if [ "$ON_SCREEN" -eq 1 ] && { : >/dev/tty; } 2>/dev/null; then
 		printf '\n    Password (shown once): %s\n\n' "$password" >/dev/tty
 	fi
 	ok "sign-in details in $FIRST_LOGIN_FILE (root only): delete it after the first sign-in"
@@ -524,6 +526,9 @@ create_first_admin() {
 main() {
 	check_root
 	touch "$LOG_FILE" && chmod 600 "$LOG_FILE"
+	# is a person watching? (decided before output goes through tee into the log)
+	ON_SCREEN=0
+	[ -t 1 ] && ON_SCREEN=1
 	exec > >(tee -a "$LOG_FILE") 2>&1
 	printf '\n===== Mira Voice install %s =====\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
