@@ -234,6 +234,24 @@ services:
       MIRA_SIP_DOMAIN: ${MIRA_SIP_DOMAIN:?run install.sh}
       TURN_SECRET: ${TURN_SECRET:?run install.sh}
 
+  # ---------------- web ----------------
+  # Mira Desk over HTTPS (443; 80 redirects) and the /api entry point to Mira Core (ADR 0012)
+  web:
+    <<: *hardening
+    image: mira/web:0.1.0
+    pull_policy: never
+    volumes:
+      - ./config/tls:/run/mira-config/tls:ro
+    healthcheck:
+      test: ['CMD', 'curl', '-fsk', '-o', '/dev/null', 'https://127.0.0.1/healthz']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      core:
+        condition: service_started
+
 volumes:
   asterisk-lib:
   asterisk-generated:

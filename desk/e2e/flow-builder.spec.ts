@@ -13,6 +13,10 @@ const EMAIL = process.env.MIRA_E2E_EMAIL ?? ''
 const PASSWORD = process.env.MIRA_E2E_PASSWORD ?? ''
 const PROMPT = process.env.MIRA_E2E_PROMPT ?? 'welcome'
 const RUN = process.env.MIRA_E2E_RUN ?? String(Date.now())
+// a platform admin, like the one deploy/install.sh creates (profile language: Arabic)
+const ADMIN_EMAIL = process.env.MIRA_E2E_ADMIN_EMAIL ?? ''
+const ADMIN_PASSWORD = process.env.MIRA_E2E_ADMIN_PASSWORD ?? ''
+const TENANT = process.env.MIRA_E2E_TENANT ?? ''
 
 async function signIn(page: Page) {
   await page.goto('/login')
@@ -176,3 +180,15 @@ for (const theme of ['light', 'dark'] as const) {
     await page.getByLabel('Theme').selectOption('system')
   })
 }
+
+test('a platform admin picks the tenant and sees its flows', async ({ page }) => {
+  await page.goto('/login')
+  await page.getByLabel('Email').fill(ADMIN_EMAIL)
+  await page.getByLabel('Password').fill(ADMIN_PASSWORD)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  // the profile language (Arabic) applies on first sign-in
+  await expect(page.getByRole('heading', { name: 'مسارات المكالمات' })).toBeVisible()
+  await page.getByLabel('اللغة').selectOption('en')
+  await page.getByLabel('Tenant').selectOption({ label: TENANT })
+  await expect(page.getByRole('link', { name: `E2E main ${RUN}` })).toBeVisible()
+})

@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Mira Voice installer v0 — Ubuntu Server 24.04 LTS (x86_64).
+# Mira Voice installer — Ubuntu Server 24.04 or 26.04 LTS (x86_64).
 #
-#   sudo ./deploy/install.sh [--public-ip IP] [--domain NAME] [--ssh-port PORT] [--allow-low-resources]
+#   sudo ./deploy/install.sh [--admin-email EMAIL] [--company NAME] [--language ar|en|fr]
+#                            [--public-ip IP] [--domain NAME] [--ssh-port PORT] [--allow-low-resources]
 #
-#   --public-ip  address phones and browsers reach (when the server is behind NAT; default: its own IP)
-#   --domain     SIP domain / certificate name, e.g. voice.example.com (default: the public IP)
+#   --admin-email  first install: the platform admin who signs in to Mira Desk (asked if missing)
+#   --company      first install: the name of the first tenant (default: Mira)
+#   --language     first install: language of that tenant and its admin (default: ar)
+#   --public-ip    address phones and browsers reach (behind NAT; default: the server's own IP)
+#   --domain       SIP domain / certificate name, e.g. voice.example.com (default: the public IP)
 #
 # Safe to run again: every step checks what is already there and only adds what is missing.
 # Existing secrets in /opt/mira/.env are never changed (changing them would lock services
@@ -15,6 +19,8 @@ MIRA_DIR=/opt/mira
 ENV_FILE="$MIRA_DIR/.env"
 LOG_FILE=/var/log/mira-install.log
 UNIT_FILE=/etc/systemd/system/mira.service
+FIRST_LOGIN_FILE=/root/mira-first-login.txt
+SUPPORTED_UBUNTU="24.04 26.04"
 JAIL_FILE=/etc/fail2ban/jail.d/mira.local
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" # .../deploy
 
@@ -27,6 +33,9 @@ ALLOW_LOW=0
 SSH_PORTS=""
 PUBLIC_IP=""
 SIP_DOMAIN=""
+ADMIN_EMAIL=""
+COMPANY="Mira"
+LANGUAGE="ar"
 
 # --- helpers -----------------------------------------------------------------------------------
 say() { printf '\n==> %s\n' "$*"; }
@@ -63,6 +72,21 @@ while [ $# -gt 0 ]; do
 		SIP_DOMAIN="$2"
 		shift
 		;;
+	--admin-email)
+		[ $# -ge 2 ] || die "--admin-email needs an address"
+		ADMIN_EMAIL="$2"
+		shift
+		;;
+	--company)
+		[ $# -ge 2 ] || die "--company needs a name"
+		COMPANY="$2"
+		shift
+		;;
+	--language)
+		[ $# -ge 2 ] || die "--language needs ar, en or fr"
+		case "$2" in ar | en | fr) LANGUAGE="$2" ;; *) die "--language: ar, en or fr" ;; esac
+		shift
+		;;
 	-h | --help) usage ;;
 	*) die "unknown option: $1 (try --help)" ;;
 	esac
@@ -95,11 +119,15 @@ check_root() {
 
 check_os() {
 	say "Checking operating system"
-	[ -r /etc/os-release ] || die "/etc/os-release not found — Mira needs Ubuntu Server 24.04 LTS"
+	local want="Ubuntu Server ${SUPPORTED_UBUNTU// / or } LTS"
+	[ -r /etc/os-release ] || die "/etc/os-release not found — Mira needs $want"
 	# shellcheck disable=SC1091
 	. /etc/os-release
-	[ "${ID:-}" = "ubuntu" ] || die "this is '${ID:-unknown}', Mira needs Ubuntu Server 24.04 LTS"
-	[ "${VERSION_ID:-}" = "24.04" ] || die "this is Ubuntu ${VERSION_ID:-?}, Mira needs 24.04 LTS"
+	[ "${ID:-}" = "ubuntu" ] || die "this is '${ID:-unknown}', Mira needs $want"
+	case " $SUPPORTED_UBUNTU " in
+	*" ${VERSION_ID:-?} "*) ;;
+	*) die "this is Ubuntu ${VERSION_ID:-?}, Mira needs $want" ;;
+	esac
 	[ "$(uname -m)" = "x86_64" ] || die "architecture $(uname -m) is not supported (x86_64 only)"
 	[ -d /run/systemd/system ] || die "systemd is not running — Mira runs as a systemd service"
 	ok "Ubuntu $VERSION_ID ($VERSION_CODENAME), $(uname -m), systemd"
@@ -128,6 +156,43 @@ check_resources() {
 		[ "$ALLOW_LOW" -eq 1 ] || die "not enough resources (re-run with --allow-low-resources to install anyway, labs only)"
 		warn "continuing because --allow-low-resources was given"
 	fi
+}
+
+# --- 1b. ports ---------------------------------------------------------------------------------
+# Mira's services bind these ports on the host (host networking). Another program on one of
+# them (e.g. an ERPNext site with its own nginx, Redis and PostgreSQL) would leave Mira half
+# started, so stop before changing anything. Mira's own containers are fine (re-runs).
+MIRA_TCP_PORTS="80 443 3478 5060 5061 5432 6379 8000 8088 8089 8095"
+MIRA_UDP_PORTS="3478 5060"
+
+port_owner() { # PROTO PORT -> "name (pid N)" of listeners that are not in a container
+	local flag=-tlnpH u name pid
+	[ "$1" = udp ] && flag=-ulnpH
+	ss "$flag" "sport = :$2" 2>/dev/null | grep -oE '"[^"]+",pid=[0-9]+' | sort -u |
+		while IFS= read -r u; do
+			name=${u%%,pid=*}
+			pid=${u##*pid=}
+			grep -qE 'docker|containerd' "/proc/$pid/cgroup" 2>/dev/null && continue
+			printf '%s (pid %s) ' "${name//\"/}" "$pid"
+		done
+}
+
+check_ports() {
+	say "Checking that Mira's ports are free"
+	local p who busy=""
+	for p in $MIRA_TCP_PORTS; do
+		who=$(port_owner tcp "$p")
+		[ -z "$who" ] || busy="$busy      tcp $p: $who"$'\n'
+	done
+	for p in $MIRA_UDP_PORTS; do
+		who=$(port_owner udp "$p")
+		[ -z "$who" ] || busy="$busy      udp $p: $who"$'\n'
+	done
+	if [ -n "$busy" ]; then
+		printf '    in use by other programs:\n%s' "$busy" >&2
+		die "Mira needs these ports itself: install it on its own server or VM, not next to another web or database server"
+	fi
+	ok "tcp ${MIRA_TCP_PORTS// /,} and udp ${MIRA_UDP_PORTS// /,} free (or already Mira's)"
 }
 
 # --- 2. base packages --------------------------------------------------------------------------
@@ -406,6 +471,52 @@ install_service() {
 	fi
 }
 
+# --- 9. first sign-in: the first tenant and its platform admin ---------------------------------
+compose_exec() { (cd "$MIRA_DIR" && docker compose --env-file "$ENV_FILE" exec -T "$@"); }
+
+admin_count() {
+	local sql="SELECT count(*) FROM users WHERE role = 'platform_admin'"
+	# shellcheck disable=SC2016 # $POSTGRES_* expand inside the postgres container
+	compose_exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "$1"' sh "$sql" 2>/dev/null | tr -dc '0-9'
+}
+
+create_first_admin() {
+	say "First sign-in"
+	local count
+	count=$(admin_count)
+	[ -n "$count" ] || die "could not read the user list from PostgreSQL (cd $MIRA_DIR && docker compose ps)"
+	if [ "$count" -gt 0 ]; then
+		ok "a platform admin already exists (more: docker compose exec core mira-core create-admin)"
+		return
+	fi
+	if [ -z "$ADMIN_EMAIL" ] && { : </dev/tty; } 2>/dev/null; then
+		printf '    E-mail address of the first administrator: ' >/dev/tty
+		read -r ADMIN_EMAIL </dev/tty || true
+	fi
+	if [ -z "$ADMIN_EMAIL" ]; then
+		warn "no administrator yet: run the installer again with --admin-email you@example.com"
+		return
+	fi
+	local out password url
+	if ! out=$(compose_exec core mira-core bootstrap --email "$ADMIN_EMAIL" --company "$COMPANY" --language "$LANGUAGE" 2>&1); then
+		die "could not create the administrator: $(printf '%s' "$out" | tail -1)"
+	fi
+	password=$(printf '%s\n' "$out" | sed -n 's/^Password.*: //p')
+	[ -n "$password" ] || die "the administrator was not created: $(printf '%s' "$out" | tail -1)"
+	url="https://$(env_get MIRA_SIP_DOMAIN)/"
+	(
+		umask 077
+		printf 'Mira Desk:  %s\nE-mail:     %s\nPassword:   %s\n\nSign in, then delete this file: sudo rm %s\n' \
+			"$url" "$ADMIN_EMAIL" "$password" "$FIRST_LOGIN_FILE" >"$FIRST_LOGIN_FILE"
+	)
+	ok "tenant \"$COMPANY\" and platform admin $ADMIN_EMAIL created"
+	# the password goes to the screen and a root-only file, never into the install log
+	if { : >/dev/tty; } 2>/dev/null; then
+		printf '\n    Password (shown once): %s\n\n' "$password" >/dev/tty
+	fi
+	ok "sign-in details in $FIRST_LOGIN_FILE (root only): delete it after the first sign-in"
+}
+
 # --- main --------------------------------------------------------------------------------------
 main() {
 	check_root
@@ -415,6 +526,7 @@ main() {
 
 	check_os
 	check_resources
+	check_ports
 	install_base_packages
 	install_docker
 	create_layout
@@ -425,9 +537,11 @@ main() {
 	configure_fail2ban
 	build_images
 	install_service
+	create_first_admin
 
-	say "Mira Voice base install complete"
+	say "Mira Voice is installed"
 	cat <<-EOF
+		    Mira Desk: https://$(env_get MIRA_SIP_DOMAIN)/   (self-signed certificate: the browser warns once)
 		    Folder:    $MIRA_DIR   (secrets in $ENV_FILE, root only)
 		    Service:   systemctl status mira
 		    Firewall:  ufw status verbose

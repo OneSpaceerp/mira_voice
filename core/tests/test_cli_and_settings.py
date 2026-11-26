@@ -48,3 +48,44 @@ async def test_create_admin_then_log_in(
 
     code = await anyio.to_thread.run_sync(main, ["create-admin", "--email", "it@example.com"])
     assert code == 1  # already exists
+
+
+async def test_bootstrap_first_install_then_nothing(
+    client: AsyncClient, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import anyio.to_thread
+
+    code = await anyio.to_thread.run_sync(
+        main,
+        ["bootstrap", "--email", "Owner@Example.com", "--company", "Acme", "--language", "en"],
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Tenant created: Acme" in out
+    password = out.strip().splitlines()[-1].rsplit(": ", 1)[1]
+    r = await client.post(
+        "/api/v1/auth/token", data={"username": "owner@example.com", "password": password}
+    )
+    assert r.status_code == 200
+    headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    me = (await client.get("/api/v1/auth/me", headers=headers)).json()
+    assert (me["role"], me["locale"]) == ("platform_admin", "en")
+    tenants = (await client.get("/api/v1/tenants", headers=headers)).json()
+    assert [(t["name"], t["slug"], t["default_locale"]) for t in tenants] == [("Acme", "main", "en")]
+
+    # the installer runs it on every install: never a second admin, never a new password
+    code = await anyio.to_thread.run_sync(main, ["bootstrap", "--email", "other@example.com"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "nothing changed" in out
+    assert "Password" not in out
+    tenants = (await client.get("/api/v1/tenants", headers=headers)).json()
+    assert len(tenants) == 1
+
+
+async def test_bootstrap_refuses_a_bad_email(capsys: pytest.CaptureFixture[str]) -> None:
+    import anyio.to_thread
+
+    code = await anyio.to_thread.run_sync(main, ["bootstrap", "--email", "admin@mira.local"])
+    assert code == 2
+    assert "Not a valid e-mail" in capsys.readouterr().err

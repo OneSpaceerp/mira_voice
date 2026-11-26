@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks deploy/install.sh on a clean Ubuntu 24.04 machine, after a first install.
+# Checks deploy/install.sh on a clean Ubuntu 24.04 or 26.04 machine, after a first install.
 # Run as root from the repo: sudo bash tests/integration/install/verify-install.sh
 set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
@@ -53,7 +53,7 @@ for svc in asterisk kamailio rtpengine; do
 	check "$svc healthy" bash -c "docker inspect -f '{{.State.Health.Status}}' mira-$svc-1 | grep -qx healthy"
 done
 check "coturn running" bash -c "docker inspect -f '{{.State.Status}}' mira-coturn-1 | grep -qx running"
-check "containers use host networking" bash -c "[ \$(docker inspect -f '{{.HostConfig.NetworkMode}}' mira-asterisk-1 mira-kamailio-1 mira-rtpengine-1 mira-coturn-1 mira-postgres-1 mira-core-1 | sort -u) = host ]"
+check "containers use host networking" bash -c "[ \$(docker inspect -f '{{.HostConfig.NetworkMode}}' mira-asterisk-1 mira-kamailio-1 mira-rtpengine-1 mira-coturn-1 mira-postgres-1 mira-core-1 mira-web-1 | sort -u) = host ]"
 # snapshot first, pattern via a file descriptor: the secret must not appear on grep's own command line
 check "no secrets on any process command line" bash -c "ps -eo args >/var/tmp/mira-ps.txt; ! grep -qFf <(sed -n 's/^TURN_SECRET=//p' /opt/mira/.env) /var/tmp/mira-ps.txt"
 systemctl restart mira
@@ -90,9 +90,59 @@ check "API refuses requests without a token" bash -c "[ \$(curl -s -o /dev/null 
 # shellcheck disable=SC2016 # $POSTGRES_* must expand inside the postgres container
 dc exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -qc "DELETE FROM users WHERE email = '"'$probe'"'"' >/dev/null 2>&1
 
+echo "### Mira Desk over HTTPS (web, ADR 0012)"
+check "web healthy" bash -c "docker inspect -f '{{.State.Health.Status}}' mira-web-1 | grep -qx healthy"
+check "http redirects to https" bash -c "curl -s -o /dev/null -w '%{http_code} %{redirect_url}' http://127.0.0.1/flows | grep -qx '301 https://127.0.0.1/flows'"
+check "https serves Mira Desk" bash -c "curl -sk https://127.0.0.1/ | grep -q '<title>Mira Desk</title>'"
+check "app routes load the app (deep links)" bash -c "curl -sk https://127.0.0.1/flows/123 | grep -q '<div id=\"app\">'"
+check "/api reaches Mira Core through https" bash -c "curl -sk https://127.0.0.1/api/v1/tenants -o /dev/null -w '%{http_code}' | grep -qx 401"
+check "security headers (CSP, nosniff, frame DENY)" bash -c "h=\$(curl -skI https://127.0.0.1/); echo \"\$h\" | grep -qi \"^content-security-policy: default-src 'self'\" && echo \"\$h\" | grep -qi '^x-content-type-options: nosniff' && echo \"\$h\" | grep -qi '^x-frame-options: DENY'"
+check "security headers also on assets and API answers" bash -c "a=\$(curl -sk https://127.0.0.1/ | grep -o '/assets/[^\"]*\.js' | head -1); curl -skI \"https://127.0.0.1\$a\" | grep -qi '^content-security-policy' && curl -skI https://127.0.0.1/api/v1/tenants | grep -qi '^x-frame-options'"
+check "hashed assets cached as immutable" bash -c "a=\$(curl -sk https://127.0.0.1/ | grep -o '/assets/[^\"]*\.js' | head -1); curl -skI \"https://127.0.0.1\$a\" | grep -qi '^cache-control:.*immutable'"
+check "nginx version hidden" bash -c "! curl -skI https://127.0.0.1/ | grep -qi '^server: nginx/'"
+check "TLS 1.1 refused" bash -c "! curl -sk --tlsv1.1 --tls-max 1.1 -o /dev/null https://127.0.0.1/"
+check "HTTP/2 offered" bash -c "curl -sk --http2 -o /dev/null -w '%{http_version}' https://127.0.0.1/ | grep -qx 2"
+check "uploads up to 12 MB pass the proxy" bash -c "head -c 11000000 /dev/zero >/tmp/mira-big.bin; [ \$(curl -sk -o /dev/null -w '%{http_code}' -X PUT --data-binary @/tmp/mira-big.bin https://127.0.0.1/api/v1/prompts/00000000-0000-0000-0000-000000000000/audio/ar) != 413 ]"
+
+echo "### first sign-in (installer creates the first tenant and platform admin)"
+# shellcheck disable=SC2016 # $POSTGRES_* must expand inside the postgres container
+admins() { dc exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "SELECT count(*) FROM users WHERE role = '"'platform_admin'"'"' | tr -dc '0-9'; }
+if [ "$(admins)" = 0 ]; then
+	first="first-$(date +%s)@example.com"
+	# shellcheck disable=SC2016
+	tenants_before=$(dc exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "SELECT count(*) FROM tenants"' | tr -dc '0-9')
+	"$REPO/deploy/install.sh" --admin-email "$first" --company "Probe Co" --language en </dev/null >/tmp/run2.out 2>&1
+	check "installer with --admin-email exits 0" test $? -eq 0
+	check "sign-in file is 600 root" test "$(stat -c '%a %U' /root/mira-first-login.txt 2>/dev/null)" = "600 root"
+	fpw=$(sed -n 's/^Password: *//p' /root/mira-first-login.txt 2>/dev/null)
+	check "sign-in file has the e-mail and a password" bash -c "grep -q '$first' /root/mira-first-login.txt && [ -n '$fpw' ]"
+	check "first password not in the install log" bash -c "! grep -qF '$fpw' /var/log/mira-install.log"
+	ftoken=$(curl -sk --max-time 5 -X POST https://127.0.0.1/api/v1/auth/token \
+		--data-urlencode "username=$first" --data-urlencode "password=$fpw" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+	check "first admin signs in through https, as platform_admin" bash -c "curl -sk -H 'Authorization: Bearer $ftoken' https://127.0.0.1/api/v1/auth/me | grep -q '\"role\":\"platform_admin\"'"
+	if [ "$tenants_before" = 0 ]; then
+		check "first tenant created" bash -c "curl -sk -H 'Authorization: Bearer $ftoken' https://127.0.0.1/api/v1/tenants | grep -q '\"name\":\"Probe Co\"'"
+	fi
+	"$REPO/deploy/install.sh" --admin-email "other-$first" </dev/null >/tmp/run3.out 2>&1
+	check "re-run: no second admin" test "$(admins)" = 1
+	# shellcheck disable=SC2016
+	dc exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -qc "DELETE FROM users WHERE email = '"'$first'"'; DELETE FROM tenants WHERE name = '"'Probe Co'"' AND NOT EXISTS (SELECT 1 FROM users WHERE tenant_id = tenants.id)"' >/dev/null 2>&1
+	rm -f /root/mira-first-login.txt
+else
+	check "an admin exists: installer leaves it alone" bash -c "$REPO/deploy/install.sh </dev/null 2>&1 | grep -q 'a platform admin already exists'"
+fi
+
+echo "### port check"
+python3 -m http.server 8000 --bind 127.0.0.2 >/dev/null 2>&1 &
+squatter=$!
+sleep 1
+check "a foreign program on Mira's port stops the installer, naming it" bash -c "$REPO/deploy/install.sh </dev/null 2>&1 | grep -qE 'tcp 8000: python3? \(pid $squatter\)'"
+kill "$squatter" 2>/dev/null
+wait "$squatter" 2>/dev/null
+
 echo "### refuses wrong OS"
-sed 's/VERSION_ID="24.04"/VERSION_ID="22.04"/' /etc/os-release >/tmp/os-release.fake
-check "OS check rejects 22.04" bash -c "unshare -m bash -c 'mount --bind /tmp/os-release.fake /etc/os-release && $REPO/deploy/install.sh' 2>&1 | grep -q 'needs 24.04'"
+sed 's/^VERSION_ID=.*/VERSION_ID="22.04"/' /etc/os-release >/tmp/os-release.fake
+check "OS check rejects 22.04" bash -c "unshare -m bash -c 'mount --bind /tmp/os-release.fake /etc/os-release && $REPO/deploy/install.sh' 2>&1 | grep -q 'needs Ubuntu Server 24.04 or 26.04 LTS'"
 
 echo
 echo "RESULT: $pass passed, $fail failed"

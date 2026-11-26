@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Mira Voice uninstaller — undoes deploy/install.sh on Ubuntu Server 24.04 LTS.
+# Mira Voice uninstaller — undoes deploy/install.sh on Ubuntu Server 24.04 / 26.04 LTS.
 #
 #   sudo ./deploy/uninstall.sh                     stop Mira, remove service, firewall rules, fail2ban jail
 #   sudo ./deploy/uninstall.sh --remove-docker     …and remove Docker Engine and its apt repository
 #   sudo ./deploy/uninstall.sh --purge             …and DELETE /opt/mira (database, recordings, secrets),
-#                                                  Mira's images and volumes
+#                                                  Mira's images and volumes, the downloaded code
 #
 # By default all data in /opt/mira is KEPT. --purge asks you to type the hostname to confirm;
 # add --yes-delete-all-data to skip the question (scripts only).
@@ -98,8 +98,10 @@ fi
 if [ "$PURGE" -eq 1 ]; then
 	say "Deleting $MIRA_DIR"
 	rm -rf "$MIRA_DIR"
-	rm -f /var/log/mira-install.log
-	ok "$MIRA_DIR deleted"
+	rm -f /var/log/mira-install.log /root/mira-first-login.txt
+	# code downloaded by deploy/get.sh (this script may be running from it: Linux keeps it open)
+	rm -rf /usr/local/src/mira-voice
+	ok "$MIRA_DIR, the first sign-in file and the downloaded code deleted"
 else
 	say "Keeping data"
 	ok "$MIRA_DIR left in place (run with --purge to delete it)"

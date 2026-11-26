@@ -34,3 +34,7 @@ services:
     build:
       <<: *build
       context: ../telephony/coturn
+  web:
+    build:
+      <<: *build
+      context: ../desk

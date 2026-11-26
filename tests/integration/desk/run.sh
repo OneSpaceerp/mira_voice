@@ -10,6 +10,8 @@
 #   sudo bash tests/integration/desk/run.sh
 #
 # Needs: Mira installed and running, Node 24 (node + npm). Uses a throw-away tenant.
+# Tests the installed site (https://127.0.0.1, the web container) when it is running.
+# shellcheck disable=SC2317 # cleanup and psql_q run from the EXIT trap
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,7 +53,7 @@ pw=$(dc exec -T core mira-core create-admin --email "$ROOT_ADMIN" --name de 2>&1
 TOKEN=$(curl -s -X POST "$API/auth/token" --data-urlencode "username=$ROOT_ADMIN" --data-urlencode "password=$pw" | json "d['access_token']")
 H=(-H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json')
 post() { curl -s "${H[@]}" -X POST "$API/$1" -d "$2"; }
-T=$(post tenants "{\"name\":\"Desk test\",\"slug\":\"$SLUG\",\"default_locale\":\"en\"}" | json "d['id']")
+T=$(post tenants "{\"name\":\"Desk test $RUN\",\"slug\":\"$SLUG\",\"default_locale\":\"en\"}" | json "d['id']")
 U=$(post users "{\"tenant_id\":\"$T\",\"email\":\"$EDITOR\",\"full_name\":\"Flow editor\",\"password\":\"$EDITOR_PW\",\"role\":\"tenant_admin\",\"locale\":\"en\"}" | json "d.get('id', d)")
 post extensions "{\"tenant_id\":\"$T\",\"number\":\"1001\",\"display_name\":\"Front desk\"}" >/dev/null
 P=$(post prompts "{\"tenant_id\":\"$T\",\"name\":\"welcome\"}" | json "d['id']")
@@ -63,19 +65,30 @@ PY
 curl -s -o /dev/null -H "Authorization: Bearer $TOKEN" -H 'Content-Type: audio/wav' \
 	-X PUT "$API/prompts/$P/audio/ar" --data-binary "@$WORK/welcome.wav"
 check=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/auth/token" --data-urlencode "username=$EDITOR" --data-urlencode "password=$EDITOR_PW")
-[ -n "$T" ] && [ -n "$P" ] && [ "$check" = 200 ] || { echo "FAIL  setup (tenant $T, prompt $P, editor $U, sign-in $check)"; exit 1; }
+if [ -z "$T" ] || [ -z "$P" ] || [ "$check" != 200 ]; then
+	echo "FAIL  setup (tenant $T, prompt $P, editor $U, sign-in $check)"
+	exit 1
+fi
 echo "tenant $SLUG, editor $EDITOR, prompt welcome (ar)"
 
-echo "### 2. build Mira Desk (outside the source tree: node_modules are per platform)"
+echo "### 2. the test tools (outside the source tree: node_modules are per platform)"
 tar -C "$REPO" --exclude=desk/node_modules --exclude=desk/dist --exclude='desk/test-results' \
-	-cf - desk design-system | tar -C "$WORK" -xf -
+	-cf - desk | tar -C "$WORK" -xf -
 cd "$WORK/desk" || exit 1
 npm ci --no-audit --no-fund --loglevel=error || exit 1
 npx playwright install --with-deps chromium >/dev/null || exit 1
-npm run build-only >/dev/null || { echo "FAIL  vite build"; exit 1; }
+# the installed site (nginx: TLS, headers, CSP) when it runs; else a local build of the source
+if [ "$(docker inspect -f '{{.State.Health.Status}}' mira-web-1 2>/dev/null)" = healthy ]; then
+	export MIRA_DESK_URL=https://127.0.0.1
+	echo "testing the installed Mira Desk at $MIRA_DESK_URL"
+else
+	npm run build-only >/dev/null || { echo "FAIL  vite build"; exit 1; }
+	echo "mira-web is not running: testing a local build through vite preview"
+fi
 
 echo "### 3. browser tests"
 MIRA_CORE_URL=http://127.0.0.1:8000 MIRA_E2E_EMAIL="$EDITOR" MIRA_E2E_PASSWORD="$EDITOR_PW" \
+	MIRA_E2E_ADMIN_EMAIL="$ROOT_ADMIN" MIRA_E2E_ADMIN_PASSWORD="$pw" MIRA_E2E_TENANT="Desk test $RUN" \
 	MIRA_E2E_PROMPT=welcome MIRA_E2E_RUN="$RUN" npx playwright test
 status=$?
 # screenshots (for the design review), lesser axe findings and failure traces
