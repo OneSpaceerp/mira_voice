@@ -10,7 +10,7 @@ Read before any work:
 
 ## Non-negotiable rules
 
-1. **Installable on Ubuntu.** Every component must install and run on **Ubuntu Server 24.04 LTS (x86_64)** with one command: `sudo ./deploy/install.sh`. Test on a clean 24.04 VM before calling a phase done. Do not depend on Windows, macOS or a specific cloud.
+1. **Installable on Ubuntu.** Every component must install and run on **Ubuntu Server 24.04 LTS and 26.04 LTS (x86_64)** with one command: `sudo ./deploy/install.sh` (or the download one-liner `deploy/get.sh`, ADR 0012). Test on clean 24.04 and 26.04 VMs before calling a phase done. Do not depend on Windows, macOS or a specific cloud.
 2. **context7 before code.** Before writing or changing code that uses any library, framework, API or config format, call the **context7** MCP server: `resolve-library-id`, then `get-library-docs` for the exact version we use. Never write Asterisk, Kamailio, FastAPI, SQLAlchemy, Vue, Vite, frappe-ui, Frappe, Flutter or plugin code from memory. Record every library and the version you checked in `docs/stack-versions.md` (name, version, date checked, context7 id). If context7 has no entry, say so, read the official docs on the web, and note it.
 3. **Use the project skills** (table below). Before a task, load the skills that match it and follow them. If two skills disagree, the design system in `design-system/` and this file win.
 4. **Small, verified steps.** One task at a time from `docs/BUILD_GUIDE.md`. For each: plan → context7 → code → tests → run it → update docs and the checklist. Never claim something works without running it.
@@ -32,7 +32,7 @@ Read before any work:
 | Web app | `desk/` | **Mira Desk**: Vue 3 + TypeScript + Vite, installable **PWA** (agent desk, Mira Flow IVR builder, Mira Pulse reports, admin) with WebRTC softphone (JsSIP or SIP.js — choose via context7) |
 | Mobile app | `phone/` | **Mira Phone**: Flutter, `sip_ua` (dart-sip-ua) + flutter-webrtc, CallKit / ConnectionService, own push gateway. Open-source only. |
 | ERPNext app | `connect/mira_connect` | **Mira Connect**: Frappe app for ERPNext v16+ and Frappe CRM v16+ |
-| Deployment | `deploy/` | Docker Engine + Compose plugin on Ubuntu 24.04, `install.sh`, systemd unit, ufw, certbot |
+| Deployment | `deploy/` | Docker Engine + Compose plugin on Ubuntu 24.04 / 26.04, `install.sh`, `get.sh`, systemd unit, ufw, nginx (web), certbot |
 
 Desktop softphone: the installable Mira Desk PWA covers Windows and macOS at MVP; a Flutter desktop build comes later only if the PWA cannot meet a requirement.
 
@@ -89,6 +89,6 @@ All skills are in `.claude/skills/` (originals in `.agents/skills/`; run `bash s
 
 - [ ] context7 checked and `docs/stack-versions.md` updated
 - [ ] Tests written and passing; lint clean
-- [ ] Runs on a clean Ubuntu 24.04 VM through `deploy/install.sh` (for anything deployable)
+- [ ] Runs on clean Ubuntu 24.04 and 26.04 VMs through `deploy/install.sh` (for anything deployable)
 - [ ] UI tasks: tokens only, AR/EN/FR strings, RTL checked, light + dark, `design-critic` score ≥ 75
 - [ ] Docs and the BUILD_GUIDE checklist updated

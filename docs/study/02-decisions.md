@@ -18,7 +18,7 @@ Live versions: study https://claude.ai/artifact/ADy8EZmt6NXEa9LkcB8k7X · design
 - UI and IVR in Arabic, English and French.
 
 ## Technical answers
-- Target OS: Ubuntu Server 24.04 LTS; one-command installer.
+- Target OS: Ubuntu Server 24.04 LTS and 26.04 LTS (ADR 0012); one-command installer, also as a download one-liner.
 - Hosting: VM on the laptop for development, then Contabo (no Middle East region: EU for Egypt tests; not for KSA data or UAE cloud).
 - Team: Khaled + Claude Code; open-source SDKs only (no Siprix).
 - Apple and Google store accounts: still to create.

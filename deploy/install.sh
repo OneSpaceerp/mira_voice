@@ -166,15 +166,18 @@ MIRA_TCP_PORTS="80 443 3478 5060 5061 5432 6379 8000 8088 8089 8095"
 MIRA_UDP_PORTS="3478 5060"
 
 port_owner() { # PROTO PORT -> "name (pid N)" of listeners that are not in a container
-	local flag=-tlnpH u name pid
+	local flag=-tlnpH listeners u name pid
 	[ "$1" = udp ] && flag=-ulnpH
-	ss "$flag" "sport = :$2" 2>/dev/null | grep -oE '"[^"]+",pid=[0-9]+' | sort -u |
-		while IFS= read -r u; do
-			name=${u%%,pid=*}
-			pid=${u##*pid=}
-			grep -qE 'docker|containerd' "/proc/$pid/cgroup" 2>/dev/null && continue
-			printf '%s (pid %s) ' "${name//\"/}" "$pid"
-		done
+	# a free port prints nothing: no pipeline here may "fail" under set -e / pipefail
+	listeners=$(ss "$flag" "sport = :$2" 2>/dev/null || true)
+	[ -n "$listeners" ] || return 0
+	while IFS= read -r u; do
+		[ -n "$u" ] || continue
+		name=${u%%,pid=*}
+		pid=${u##*pid=}
+		if grep -qE 'docker|containerd' "/proc/$pid/cgroup" 2>/dev/null; then continue; fi
+		printf '%s (pid %s) ' "${name//\"/}" "$pid"
+	done < <(printf '%s\n' "$listeners" | grep -oE '"[^"]+",pid=[0-9]+' | sort -u || true)
 }
 
 check_ports() {
