@@ -13,7 +13,7 @@ curl -fsSL https://raw.githubusercontent.com/OneSpaceerp/mira_voice/main/deploy/
   | sudo bash -s -- --admin-email you@example.com --company "Your Company"
 ```
 
-Or from a clone: `sudo ./deploy/install.sh --admin-email you@example.com`. When it finishes, open **https://&lt;server address&gt;/** (Mira Desk) and sign in with that e-mail and the password the installer prints once (also saved in `/root/mira-first-login.txt`, root only: delete it after signing in). The certificate is self-signed until a real one is set up, so the browser warns once. Options and details: [deploy/README.md](deploy/README.md).
+Or from a clone: `sudo ./deploy/install.sh --admin-email you@example.com`. When it finishes, open **https://*your-server-address*/** (Mira Desk) and sign in with that e-mail and the password the installer prints once (also saved in `/root/mira-first-login.txt`, root only: delete it after signing in). The certificate is self-signed until a real one is set up, so the browser warns once. Options and details: [deploy/README.md](deploy/README.md).
 
 ## Where things are
 

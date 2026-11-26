@@ -11,7 +11,7 @@
 #
 # Needs: Mira installed and running, Node 24 (node + npm). Uses a throw-away tenant.
 # Tests the installed site (https://127.0.0.1, the web container) when it is running.
-# shellcheck disable=SC2317 # cleanup and psql_q run from the EXIT trap
+# shellcheck disable=SC2317,SC2329 # cleanup and psql_q run from the EXIT trap
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

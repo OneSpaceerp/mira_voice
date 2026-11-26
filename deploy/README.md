@@ -1,23 +1,37 @@
 # deploy/
 
-Everything that puts Mira on an Ubuntu Server 24.04 LTS machine with one command:
+Everything that puts Mira on an Ubuntu Server **24.04 or 26.04 LTS** machine (x86_64, a machine of its own) with one command (ADR 0012).
+
+**Download and install** (nothing to clone first):
 
 ```bash
-sudo ./deploy/install.sh                       # install or update (safe to run again)
+curl -fsSL https://raw.githubusercontent.com/OneSpaceerp/mira_voice/main/deploy/get.sh \
+  | sudo bash -s -- --admin-email you@example.com --company "Your Company" --language ar
+```
+
+Then open **https://*your-server-address*/** and sign in. The password is printed once and saved in `/root/mira-first-login.txt` (root only; delete it after signing in). The certificate is self-signed until task 2.6, so the browser warns once.
+
+**From a clone**, or to change something later:
+
+```bash
+sudo ./deploy/install.sh --admin-email you@example.com   # install or update (safe to run again)
 sudo ./deploy/install.sh --public-ip 203.0.113.7 --domain voice.example.com   # behind NAT / with a name
 sudo ./deploy/lab-extensions.sh                # lab: create test extensions 1001-1004
-cd /opt/mira && sudo docker compose exec core mira-core create-admin --email it@example.com   # first platform admin
+cd /opt/mira && sudo docker compose exec core mira-core create-admin --email it@example.com   # another platform admin
 sudo ./deploy/uninstall.sh                     # remove Mira, keep data in /opt/mira
-sudo ./deploy/uninstall.sh --purge             # …and delete the data (asks for the hostname)
+sudo ./deploy/uninstall.sh --purge             # …and delete the data and the downloaded code (asks for the hostname)
 ```
+
+Before it changes anything, the installer stops if another program already uses one of Mira's ports (80, 443, 3478, 5060, 5061, 5432, 6379, 8000, 8088, 8089, 8095), naming it. Mira does not share a server with another web or database server.
 
 | File | Purpose | Task |
 | --- | --- | --- |
-| `install.sh` | Checks OS (Ubuntu 24.04, x86_64, systemd) and resources; installs Docker Engine + Compose plugin from Docker's apt repo; creates `/opt/mira`; generates secrets into `/opt/mira/.env`; ufw + fail2ban; detects the server's IP; self-signed TLS certificate; builds the telephony images; installs and starts `mira.service`. Idempotent. Options: `--public-ip IP`, `--domain NAME`, `--ssh-port PORT`, `--allow-low-resources` | 0.2, 0.3 |
+| `install.sh` | Checks OS (Ubuntu 24.04 or 26.04, x86_64, systemd), resources and **free ports**; installs Docker Engine + Compose plugin from Docker's apt repo; creates `/opt/mira`; generates secrets into `/opt/mira/.env`; ufw + fail2ban; detects the server's IP; self-signed TLS certificate; builds the images (telephony, Core, **web**); installs and starts `mira.service`; on the first install creates the first tenant and platform admin (`mira-core bootstrap`). Idempotent. Options: `--admin-email EMAIL`, `--company NAME`, `--language ar\|en\|fr`, `--public-ip IP`, `--domain NAME`, `--ssh-port PORT`, `--allow-low-resources` | 0.2, 0.3, ADR 0012 |
+| `get.sh` | One-command download: fetches the GitHub archive of `MIRA_REF` (default `main`) over HTTPS into `/usr/local/src/mira-voice`, then runs `install.sh` with the same options. Run again to update | ADR 0012 |
 | `uninstall.sh` | Undoes `install.sh`. Keeps data unless `--purge`; `--remove-docker` removes Docker too. Never turns the firewall off or closes SSH | 0.2 |
 | `systemd/mira.service` | Runs `docker compose up --detach --wait` in `/opt/mira`; skipped until a compose file exists | 0.2 |
-| `docker-compose.yml` | PostgreSQL 16, Valkey 9.1 (live state, 127.0.0.1:6379, no persistence), `core-migrate` (one-shot: `alembic upgrade head`, Asterisk DB role, `render-config`), Mira Core, `core-events` (ARI event worker), `core-ivr` (Mira Flow engine), Kamailio, Asterisk, RTPengine, coturn — host networking, only the env vars each needs, `no-new-privileges`; installed to `/opt/mira` | 0.3, 0.4, 1.2, 1.3 |
-| `docker-compose.build.yml` | Build overlay used by `install.sh` (contexts in `../core/` and `../telephony/`, `network: host`) | 0.3, 0.4 |
+| `docker-compose.yml` | PostgreSQL 16, Valkey 9.1 (live state, 127.0.0.1:6379, no persistence), `core-migrate` (one-shot: `alembic upgrade head`, Asterisk DB role, `render-config`), Mira Core, `core-events` (ARI event worker), `core-ivr` (Mira Flow engine), Kamailio, Asterisk, RTPengine, coturn, **web** (nginx: Mira Desk on 443, 80 → 443, `/api` → Core) — host networking, only the env vars each needs, `no-new-privileges`; installed to `/opt/mira` | 0.3, 0.4, 1.2, 1.3 |
+| `docker-compose.build.yml` | Build overlay used by `install.sh` (contexts in `../core/`, `../telephony/` and `../desk/`, `network: host`) | 0.3, 0.4 |
 | `lab-extensions.sh` | Test extensions 1001–1004 with random passwords (`--rotate` for new ones) until Mira Core manages extensions | 0.3 |
 | `upgrade.sh`, `backup.sh` | Upgrade and backup/restore | 2.6 |
 

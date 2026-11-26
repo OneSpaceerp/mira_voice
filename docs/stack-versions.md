@@ -8,7 +8,7 @@ How versions were picked (task 0.1, 2026-11-25): context7 for docs, requirements
 
 | Library / tool | Version used | Checked on | context7 library id | Notes |
 | --- | --- | --- | --- | --- |
-| Ubuntu Server | 24.04 LTS | 2026-11-25 | — | Target OS for every install |
+| Ubuntu Server | 24.04 LTS and **26.04 LTS** (26.04.1 tested) | 2026-11-26 | — (ubuntu.com release notes) | Both are targets (ADR 0012). 26.04.1 released 27 Aug 2026, supported to 2031; it ships **rust-coreutils** (uutils) as `coreutils` and **sudo-rs** as `sudo`: the installer is tested on it, keep scripts to POSIX/GNU-common flags |
 | Asterisk | 22 LTS (22.12.0) | 2026-11-25 | /asterisk/asterisk (22.6.0 indexed), /websites/asterisk | Bug fixes to Oct 2028, security fixes to Oct 2029 (asterisk.org). See Telephony below |
 | Python (Mira Core) | 3.12 | 2026-11-25 | — | Ubuntu 24.04's system Python; Docker image `python:3.12-slim`. FastAPI 0.165 and SQLAlchemy 2.1 need ≥ 3.11 |
 | Python (Mira Connect) | 3.14 | 2026-11-25 | /websites/frappe_io_framework | Required by Frappe v16 (install docs). Lives only inside the Frappe bench |
@@ -18,10 +18,12 @@ How versions were picked (task 0.1, 2026-11-25): context7 for docs, requirements
 
 | Library / tool | Version used | Checked on | context7 library id | Notes |
 | --- | --- | --- | --- | --- |
-| Docker Engine | latest `docker-ce` from Docker's apt repo (noble, stable) | 2026-11-25 | /docker/docs | Install steps from docs.docker.com/engine/install/ubuntu: remove `docker.io` etc., key in `/etc/apt/keyrings/docker.asc`, deb822 `docker.sources`. **Published container ports bypass ufw** (Docker docs, "Docker and ufw") |
+| Docker Engine | latest `docker-ce` from Docker's apt repo (`noble` or `resolute`, stable) | 2026-11-26 | /docker/docs | Install steps from docs.docker.com/engine/install/ubuntu: remove `docker.io` etc., key in `/etc/apt/keyrings/docker.asc`, deb822 `docker.sources`. **Published container ports bypass ufw** (Docker docs, "Docker and ufw") |
 | Docker Compose plugin | v5 (`docker-compose-plugin`; 5.8.0 installed on test 2026-11-25) | 2026-11-25 | /docker/compose (v5.6.1) | systemd unit uses `up --detach --wait --remove-orphans`; images built with `network: host` (Docker's build network cannot reach some local resolvers, e.g. WSL's) |
 | ufw | Ubuntu 24.04 package | 2026-11-25 | none in context7 (only add-ons) — read the Ubuntu noble man page, manpages.ubuntu.com ufw(8) | Port ranges need a protocol (`10000:20000/udp`); `limit` for SSH; `--force enable` for scripts |
-| fail2ban | Ubuntu 24.04 package (1.0.x) | 2026-11-25 | /fail2ban/fail2ban | `backend = systemd` for sshd (needs `python3-systemd`; Ubuntu 24.04 may have no `/var/log/auth.log`), `banaction = ufw` |
+| nginx (web container) | **1.30.8** (`nginx:1.30.8-trixie`, = `stable` on 2026-11-26) | 2026-11-26 | /websites/nginx_en, /nginx/docker-nginx | Serves Mira Desk, `/api` → Core (ADR 0012). `http2 on;` (not `listen … http2`), `add_header_inherit merge` (≥ 1.29.3) so security headers reach every location; image has `curl` (health check) |
+| Node.js (build stage of the web image) | 24.22.3 (`node:24.22.3-trixie-slim`) | 2026-11-26 | — (Docker Hub) | Builds Mira Desk inside Docker: the server needs no Node |
+| fail2ban | Ubuntu package (1.0.x on 24.04) | 2026-11-25 | /fail2ban/fail2ban | `backend = systemd` for sshd (needs `python3-systemd`; Ubuntu 24.04 may have no `/var/log/auth.log`), `banaction = ufw` |
 
 ## Telephony (telephony/) — task 0.3
 
