@@ -9,6 +9,7 @@ Target: **Ubuntu Server 24.04 or 26.04 LTS (x86_64)**, on a machine of its own (
 One command downloads Mira and installs it:
 
 ```bash
+sudo apt-get update && sudo apt-get install -y curl   # minimal installs have no curl
 curl -fsSL https://raw.githubusercontent.com/OneSpaceerp/mira_voice/main/deploy/get.sh \
   | sudo bash -s -- --admin-email you@example.com --company "Your Company"
 ```
