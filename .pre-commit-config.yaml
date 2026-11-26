@@ -23,6 +23,11 @@ repos:
       - id: check-json
       - id: check-merge-conflict
       - id: check-executables-have-shebangs
+      # Windows does not record the executable bit: a script without it fails on Ubuntu
+      # ("sudo ./deploy/install.sh: command not found"). Fix: git update-index --chmod=+x FILE
+      - id: check-shebang-scripts-are-executable
+        # third-party skills; "#!KAMAILIO" is a Kamailio directive, not a shebang
+        exclude: ^(\.agents/|telephony/kamailio/kamailio\.cfg\.tmpl$)
       - id: check-added-large-files
         args: [--maxkb=2048]
       - id: detect-private-key
