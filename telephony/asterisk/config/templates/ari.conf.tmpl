@@ -1,0 +1,14 @@
+; Mira Voice — ARI (Asterisk REST Interface) for Mira Core. Rendered by entrypoint.sh.
+[general]
+enabled = yes
+pretty = no
+allowed_origins =
+; Every channel's JSON carries the call it belongs to (all legs of a call share the linkedid).
+; Mira Core's event worker groups channels into calls with it (task 1.3).
+channelvars = CHANNEL(linkedid)
+
+[${ARI_USER}]
+type = user
+read_only = no
+password = ${ARI_PASSWORD}
+password_format = plain

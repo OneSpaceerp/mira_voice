@@ -1,0 +1,4 @@
+# Mira Voice — Asterisk nodes behind the SIP edge.
+# setid  destination                flags priority attributes
+# Set 1 = call engines. The Server edition has one node on the same host; Mira Cloud adds more.
+1 sip:127.0.0.1:5080 0 0 duid=asterisk-1

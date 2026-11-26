@@ -1,0 +1,6 @@
+[submodule ".agents/skills/apple-design"]
+	path = .agents/skills/apple-design
+	url = https://github.com/dickwu/apple-design-skill.git
+[submodule ".agents/skills/PWA_Skills/claude-code-mobile-ssh"]
+	path = .agents/skills/PWA_Skills/claude-code-mobile-ssh
+	url = https://github.com/aiya000/claude-code-mobile-ssh.git

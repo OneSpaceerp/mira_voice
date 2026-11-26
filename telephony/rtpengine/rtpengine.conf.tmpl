@@ -1,0 +1,20 @@
+# Mira Voice — RTPengine. Rendered by entrypoint.sh from /opt/mira/.env values.
+#   external: clients (phones, browsers) — MIRA_LOCAL_IP, advertised as MIRA_PUBLIC_IP,
+#             UDP 10000-14999 (inside the ufw RTP range; 15000-19999 belongs to coturn)
+#   internal: Asterisk on 127.0.0.1 (same port numbers, loopback only)
+[rtpengine]
+interface = external/${MIRA_LOCAL_IP}!${MIRA_PUBLIC_IP};internal/127.0.0.1
+port-min = 10000
+port-max = 14999
+listen-ng = 127.0.0.1:2223
+listen-cli = 127.0.0.1:9900
+# userspace forwarding only (no kernel module in a container)
+table = -1
+foreground = true
+log-stderr = true
+log-level = 6
+timeout = 60
+silent-timeout = 3600
+final-timeout = 14400
+delete-delay = 30
+tos = 184

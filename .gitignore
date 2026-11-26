@@ -1,0 +1,71 @@
+# --- secrets: never commit (CLAUDE.md rule 5) ---
+.env
+**/.env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+
+# --- Claude Code: personal settings stay local; skills are regenerated from .agents/skills ---
+.claude/settings.local.json
+.claude/skills/
+
+# --- Python (core/, connect/) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Node / Vue (desk/) ---
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.tsbuildinfo
+coverage/
+playwright-report/
+test-results/
+blob-report/
+
+# --- Flutter (phone/) ---
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.iml
+.idea/
+phone/**/ios/Pods/
+phone/**/android/.gradle/
+phone/**/android/local.properties
+
+# --- runtime data ---
+/recordings/
+*.log
+*.pcap
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+*.swp
+
+# --- generated test bundles ---
+tests/integration/telephony/webrtc/vendor/
+
+# --- editor / plugin caches ---
+.impeccable/
+
+# Dart library packages do not commit their lock file (apps do)
+phone/packages/*/pubspec.lock

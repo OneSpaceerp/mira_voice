@@ -1,0 +1,23 @@
+# Mira Voice — runs the Docker Compose stack in /opt/mira.
+# Installed by deploy/install.sh to /etc/systemd/system/mira.service.
+[Unit]
+Description=Mira Voice contact center (Docker Compose stack)
+Documentation=https://voice.nsd-eg.com
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+# Until a compose file is installed (task 0.3) the unit is skipped, not failed.
+ConditionPathExists=/opt/mira/docker-compose.yml
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/mira
+ExecStart=/usr/bin/docker compose --env-file /opt/mira/.env up --detach --wait --remove-orphans
+ExecReload=/usr/bin/docker compose --env-file /opt/mira/.env up --detach --wait --remove-orphans
+ExecStop=/usr/bin/docker compose --env-file /opt/mira/.env down
+TimeoutStartSec=600
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

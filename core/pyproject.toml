@@ -1,0 +1,54 @@
+[project]
+name = "mira-core"
+version = "0.1.0"
+description = "Mira Voice control plane: REST API, auth, data model, Asterisk control (ARI)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary — Nest Software Development" }
+dependencies = [
+    "fastapi[standard]>=0.165.0",
+    "sqlalchemy[asyncio]>=2.1.9",  # 2.1: greenlet is no longer installed without this extra
+    "alembic>=1.20.1",
+    "psycopg[binary]>=3.3.9",
+    "pydantic>=2.14.4",
+    "pydantic-settings>=2.16.3",
+    "pyjwt>=2.15.1",
+    "pwdlib[argon2]>=0.4.2",
+    "httpx>=0.28.1",  # ARI client
+    "jinja2>=3.1.6",  # dialplan templates
+    "cryptography>=50.0.2",  # Fernet for carrier passwords
+    "redis>=8.1.0",  # live call state in Valkey (Redis protocol)
+    "websockets>=16.0",  # ARI event stream
+]
+
+[project.scripts]
+mira-core = "mira_core.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "httpx>=0.28.1",
+    "testcontainers[postgres,redis]>=4.15.0",
+    "mypy>=2.4.1",
+    "ruff>=0.17.6",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.10,<0.14"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = ["error::DeprecationWarning:mira_core.*"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+packages = ["mira_core"]
+
+[[tool.mypy.overrides]]
+module = ["testcontainers.*"]
+ignore_missing_imports = true

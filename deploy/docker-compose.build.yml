@@ -1,0 +1,36 @@
+# Mira Voice — build overlay, used only by deploy/install.sh from the source tree:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build
+# Image names and tags live in docker-compose.yml; versions of what goes inside each image
+# are pinned in the Dockerfiles (and recorded in docs/stack-versions.md).
+#
+# Builds use the host network, like the services themselves: downloads then use the host's
+# own DNS and proxy settings (Docker's build network cannot reach some local resolvers,
+# e.g. WSL's or a host-only dnsmasq).
+x-build: &build
+  network: host
+
+services:
+  core-migrate:
+    build:
+      <<: *build
+      context: ../core
+  core:
+    build:
+      <<: *build
+      context: ../core
+  rtpengine:
+    build:
+      <<: *build
+      context: ../telephony/rtpengine
+  asterisk:
+    build:
+      <<: *build
+      context: ../telephony/asterisk
+  kamailio:
+    build:
+      <<: *build
+      context: ../telephony/kamailio
+  coturn:
+    build:
+      <<: *build
+      context: ../telephony/coturn

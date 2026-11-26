@@ -1,0 +1,21 @@
+# Ruff settings for Mira Core (core/) and Python tools. connect/mira_connect has its own
+# pyproject.toml (Frappe style: tabs, Python 3.14) which overrides this file there.
+target-version = "py312"
+line-length = 100
+extend-exclude = [".agents", ".claude"]
+
+[lint]
+# pycodestyle, pyflakes, isort, pyupgrade, bugbear, simplify, bandit (security)
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "S"]
+ignore = ["E501"] # line length is the formatter's job
+
+[lint.per-file-ignores]
+"**/tests/**" = ["S101", "S105", "S106"] # assert and test passwords are fine in tests
+"**/migrations/**" = ["S608"] # migrations build DDL from fixed text, never from input
+
+[format]
+quote-style = "double"
+
+[lint.isort]
+# same import order whether ruff runs from the repo root (pre-commit) or from core/
+known-first-party = ["mira_core"]

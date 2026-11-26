@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1720" />
+  <title>Offline · Fieldnote</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#f4f1ea; --text:#1b2430; --muted:#5d6672; --primary:#e8642c; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#0f1720; --text:#eef0f2; --muted:#9aa3ad; --primary:#ff9a52; } }
+    html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font:16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
+    main { min-height:100dvh; display:grid; place-content:center; gap:14px; padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom)); text-align:center; }
+    svg { width:72px; height:72px; margin:auto; stroke:var(--primary); fill:none; stroke-width:1.6; stroke-linecap:round; }
+    h1 { margin:0; font: 750 1.6rem/1.15 ui-rounded, system-ui, sans-serif; letter-spacing:-.02em; }
+    p { margin:0; color:var(--muted); max-width: 32ch; }
+    button { margin: 8px auto 0; height:48px; padding: 0 24px; border:0; border-radius:999px; background:var(--primary); color:#fff; font:650 1rem system-ui, sans-serif; }
+    button:active { transform: scale(.97); }
+  </style>
+</head>
+<body>
+  <main>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 8.5a15 15 0 0120 0M5 12a10 10 0 0114 0M8.5 15.5a5 5 0 017 0"/><path d="M3 3l18 18"/><circle cx="12" cy="19" r="1"/></svg>
+    <h1>You're offline</h1>
+    <p>This page isn't saved on your device yet. Everything you've already opened still works, and new notes will sync when you're back.</p>
+    <button type="button" onclick="location.reload()">Try again</button>
+  </main>
+  <script>addEventListener('online', () => location.reload());</script>
+</body>
+</html>

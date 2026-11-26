@@ -1,0 +1,282 @@
+/* =====================================================================
+   NATIVE-FEEL APP SHELL — tokens → base → shell → components → motion
+   Swap tokens for the brand; keep the behaviour layer as-is.
+   ===================================================================== */
+
+/* ---------- 1. TOKENS ---------- */
+:root {
+  color-scheme: light dark;
+
+  /* Type: system UI for body = instant, native, offline. Character comes from the display face. */
+  --font-ui: system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Roboto, "Noto Sans", "Noto Sans Arabic", sans-serif;
+  --font-display: ui-rounded, "SF Pro Rounded", "Nunito", var(--font-ui);
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", monospace;
+
+  /* Colour (OKLCH = perceptually even ramps; contrast-checked ≥ 4.5:1 for text) */
+  --bg:        oklch(96% 0.012 85);
+  --surface:   oklch(99% 0.006 85);
+  --surface-2: oklch(93% 0.014 85);
+  --text:      oklch(22% 0.02 250);
+  --muted:     oklch(48% 0.02 250);
+  --border:    oklch(86% 0.015 85);
+  --primary:   oklch(66% 0.19 45);       /* ember */
+  --on-primary:oklch(99% 0.01 85);
+  --ok:        oklch(68% 0.15 150);
+  --warn:      oklch(78% 0.15 80);
+  --danger:    oklch(60% 0.2 25);
+  accent-color: var(--primary);
+
+  /* Shape & depth */
+  --r-s: 10px; --r-m: 16px; --r-l: 26px; --r-pill: 999px;
+  --shadow-1: 0 1px 2px oklch(0% 0 0 / .06), 0 2px 8px oklch(0% 0 0 / .05);
+  --shadow-2: 0 8px 24px oklch(0% 0 0 / .14), 0 2px 6px oklch(0% 0 0 / .08);
+
+  /* Motion: short, decelerating, interruptible. Spring via linear() where supported. */
+  --dur-1: 120ms; --dur-2: 220ms; --dur-3: 340ms;
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --ease-emph: cubic-bezier(.05, .7, .1, 1);          /* Material 3 emphasized-decelerate */
+  --ease-spring: cubic-bezier(.34, 1.4, .64, 1);      /* fallback overshoot */
+
+  /* Safe areas + shell metrics */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --appbar-h: 52px;
+  --tabbar-h: 58px;
+  --kb-inset: 0px;                                     /* set by platform.ts on iOS */
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root { --ease-spring: linear(0, 0.006, 0.025 2.8%, 0.101 6.1%, 0.539 18.9%, 0.721 25.3%, 0.849 31.5%, 0.937 38.1%, 0.968 41.8%, 0.991 45.7%, 1.006 50.1%, 1.015 55%, 1.017 63.9%, 1.001 85.9%, 1); }
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:        oklch(19% 0.02 250);
+    --surface:   oklch(23% 0.022 250);
+    --surface-2: oklch(28% 0.024 250);
+    --text:      oklch(95% 0.01 85);
+    --muted:     oklch(72% 0.02 250);
+    --border:    oklch(34% 0.02 250);
+    --primary:   oklch(74% 0.17 55);
+    --on-primary:oklch(20% 0.03 250);
+    --shadow-2: 0 10px 30px oklch(0% 0 0 / .5);
+  }
+}
+
+/* ---------- 2. BASE (behaviour that makes it feel like an app) ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+html {
+  -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
+  background: var(--bg);
+  scroll-padding-top: calc(var(--appbar-h) + var(--safe-t));   /* anchors don't hide under the bar */
+}
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 1rem/1.45 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;    /* no grey flash on tap */
+  overscroll-behavior-y: none;                 /* no browser pull-to-refresh / rubber-band glow */
+  text-rendering: optimizeLegibility;
+}
+/* App chrome is not text: no selection, no iOS long-press callout, no double-tap zoom delay */
+button, .tab, .row, .fab, .appbar, .tabbar, [role="button"] {
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+a { color: inherit; }
+img, svg, video, canvas { display: block; max-width: 100%; }
+svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+input, textarea, select, button { font: inherit; color: inherit; }
+input, textarea, select { font-size: max(16px, 1rem); } /* < 16px = iOS zooms on focus */
+:focus { outline: none; }
+:focus-visible { outline: 2.5px solid var(--primary); outline-offset: 2px; border-radius: var(--r-s); }
+.skip-link { position: absolute; left: -9999px; }
+.skip-link:focus { left: calc(12px + var(--safe-l)); top: calc(8px + var(--safe-t)); z-index: 100; background: var(--surface); padding: 8px 12px; border-radius: var(--r-s); }
+[hidden] { display: none !important; }
+
+/* ---------- 3. SHELL: app bar · content · tab bar / nav rail ---------- */
+.appbar {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 8px;
+  min-height: calc(var(--appbar-h) + var(--safe-t));
+  padding: var(--safe-t) max(12px, var(--safe-r)) 0 max(12px, var(--safe-l));
+  background: color-mix(in oklab, var(--bg) 78%, transparent);
+  -webkit-backdrop-filter: saturate(180%) blur(18px); backdrop-filter: saturate(180%) blur(18px);
+  border-bottom: 0.5px solid color-mix(in oklab, var(--border) 70%, transparent);
+  view-transition-name: appbar;                 /* stays put during page transitions */
+}
+.appbar-title { flex: 1; margin: 0; font: 650 1.0625rem/1 var(--font-ui); letter-spacing: -0.01em; }
+.icon-btn {
+  display: grid; place-items: center;
+  inline-size: 44px; block-size: 44px;           /* ≥44pt iOS / 48dp Android hit target */
+  border: 0; border-radius: var(--r-pill); background: transparent; cursor: pointer;
+}
+.icon-btn svg { inline-size: 24px; block-size: 24px; }
+.back-btn svg { transform: scaleX(var(--dir-x, 1)); }
+:root:dir(rtl) { --dir-x: -1; }
+.net-pill { font-size: .75rem; padding: 4px 10px; border-radius: var(--r-pill); background: var(--warn); color: oklch(25% .05 80); }
+
+.content {
+  padding: 8px max(16px, var(--safe-r)) calc(var(--tabbar-h) + var(--safe-b) + 96px) max(16px, var(--safe-l));
+  max-inline-size: 760px; margin-inline: auto;
+  view-transition-name: main;
+}
+.content:focus { outline: none; }
+
+.tabbar {
+  position: fixed; inset: auto 0 0 0; z-index: 30;
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+  padding: 4px max(8px, var(--safe-r)) calc(4px + var(--safe-b)) max(8px, var(--safe-l));
+  background: color-mix(in oklab, var(--surface) 80%, transparent);
+  -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+  border-top: 0.5px solid color-mix(in oklab, var(--border) 80%, transparent);
+  view-transition-name: tabbar;
+  transition: translate var(--dur-2) var(--ease-out);
+}
+.tab {
+  display: grid; justify-items: center; align-content: center; gap: 3px;
+  min-block-size: var(--tabbar-h); text-decoration: none;
+  font-size: .6875rem; font-weight: 600; color: var(--muted);
+}
+.tab svg { inline-size: 26px; block-size: 26px; transition: transform var(--dur-2) var(--ease-spring); }
+.tab[aria-current="page"] { color: var(--primary); }
+.tab[aria-current="page"] svg { fill: color-mix(in oklab, var(--primary) 22%, transparent); }
+.tab:active svg { transform: scale(.86); }
+/* Keyboard open (iOS via --kb-inset, others via interactive-widget): hide the tab bar */
+:root[data-keyboard="open"] .tabbar, :root[data-keyboard="open"] .fab { translate: 0 calc(100% + 24px); }
+
+/* Large screens: tab bar becomes a nav rail (Material ≥ 840dp / iPad landscape) */
+@media (min-width: 840px) {
+  .tabbar {
+    inset: 0 auto 0 0; inline-size: calc(88px + var(--safe-l));
+    grid-auto-flow: row; grid-auto-rows: 76px; align-content: start;
+    padding: calc(var(--appbar-h) + var(--safe-t) + 8px) 8px var(--safe-b) max(8px, var(--safe-l));
+    border-top: 0; border-inline-end: 0.5px solid var(--border);
+  }
+  body { padding-inline-start: calc(88px + var(--safe-l)); }   /* rail gutter; content stays centred */
+  .fab { inset-block-end: 24px; }
+}
+
+/* Desktop installed app with Window Controls Overlay: app bar becomes the title bar */
+@media (display-mode: window-controls-overlay) {
+  .appbar {
+    position: fixed; inset-inline: 0; top: 0;
+    left: env(titlebar-area-x, 0); inline-size: env(titlebar-area-width, 100%);
+    min-height: env(titlebar-area-height, var(--appbar-h)); padding-top: 0;
+    app-region: drag; -webkit-app-region: drag;
+  }
+  .appbar button, .appbar a { app-region: no-drag; -webkit-app-region: no-drag; }
+  .content { padding-top: calc(env(titlebar-area-height, 40px) + 16px); }
+}
+/* Running in a browser tab: show web affordances; installed: hide them */
+@media (display-mode: browser) { .only-installed { display: none; } }
+@media (display-mode: standalone), (display-mode: fullscreen), (display-mode: window-controls-overlay) { .only-browser { display: none; } }
+
+/* ---------- 4. COMPONENTS ---------- */
+.pressable { transition: transform var(--dur-1) var(--ease-out), background-color var(--dur-1), opacity var(--dur-1); }
+.pressable:active { transform: scale(.97); }
+@media (hover: hover) and (pointer: fine) { .row:hover, .icon-btn:hover { background: var(--surface-2); } }
+
+.hero { padding: 20px 4px 12px; }
+.eyebrow { margin: 0 0 6px; font-size: .8125rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--primary); }
+.display { margin: 0; font: 750 clamp(1.9rem, 6vw, 2.6rem)/1.05 var(--font-display); letter-spacing: -0.025em; text-wrap: balance; }
+.muted { color: var(--muted); margin: 8px 0 0; }
+
+.list { list-style: none; margin: 12px 0; padding: 0; background: var(--surface); border-radius: var(--r-m); box-shadow: var(--shadow-1); overflow: clip; }
+.list li + li .row { border-top: 0.5px solid var(--border); }
+.row { display: flex; align-items: center; gap: 14px; min-block-size: 64px; padding: 10px 14px; text-decoration: none; }
+.row-body { flex: 1; display: grid; gap: 2px; }
+.row-body small { color: var(--muted); font-size: .8125rem; }
+.row-dot { inline-size: 10px; block-size: 10px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 4px color-mix(in oklab, var(--primary) 18%, transparent); }
+.row-dot.is-warn { background: var(--warn); box-shadow: 0 0 0 4px color-mix(in oklab, var(--warn) 22%, transparent); }
+.row-dot.is-ok { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in oklab, var(--ok) 20%, transparent); }
+.chev { inline-size: 18px; block-size: 18px; color: var(--muted); transform: scaleX(var(--dir-x, 1)); }
+
+.card { background: var(--surface); border-radius: var(--r-m); padding: 16px; box-shadow: var(--shadow-1); display: grid; gap: 10px; }
+.skeleton { block-size: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--surface-2) 0 40%, color-mix(in oklab, var(--surface-2) 60%, var(--surface)) 50%, var(--surface-2) 60% 100%) 0 0 / 300% 100%; animation: shimmer 1.4s linear infinite; }
+@keyframes shimmer { to { background-position: -150% 0; } }
+
+.fab {
+  position: fixed; z-index: 25;
+  inset-inline-end: max(16px, var(--safe-r));
+  inset-block-end: calc(var(--tabbar-h) + var(--safe-b) + 16px);
+  display: inline-flex; align-items: center; gap: 8px;
+  block-size: 56px; padding: 0 20px 0 16px; border: 0; border-radius: 18px;
+  background: var(--primary); color: var(--on-primary); font-weight: 650;
+  box-shadow: var(--shadow-2); cursor: pointer;
+  transition: transform var(--dur-2) var(--ease-spring), translate var(--dur-2) var(--ease-out);
+}
+.fab svg { inline-size: 24px; block-size: 24px; }
+
+.btn { block-size: 48px; padding: 0 20px; border-radius: var(--r-pill); border: 0; font-weight: 650; cursor: pointer; }
+.btn-primary { background: var(--primary); color: var(--on-primary); }
+.btn-ghost { background: var(--surface-2); }
+.stack { display: grid; gap: 14px; }
+.field { display: grid; gap: 6px; font-size: .875rem; font-weight: 600; color: var(--muted); }
+.field input, .field textarea { inline-size: 100%; padding: 12px 14px; border-radius: var(--r-s); border: 1px solid var(--border); background: var(--bg); color: var(--text); font-weight: 400; }
+.field input:focus-visible, .field textarea:focus-visible { outline-offset: 0; }
+
+/* Bottom sheet: native <dialog> + @starting-style entry + allow-discrete exit. Drag handled in sheet.ts */
+dialog.sheet {
+  position: fixed; inset: auto 0 0 0; margin: 0 auto;
+  inline-size: 100%; max-inline-size: 640px; max-block-size: calc(100dvh - var(--safe-t) - 24px);
+  padding: 8px max(20px, var(--safe-r)) calc(20px + var(--safe-b) + var(--kb-inset)) max(20px, var(--safe-l));
+  border: 0; border-radius: var(--r-l) var(--r-l) 0 0;
+  background: var(--surface); color: var(--text); box-shadow: var(--shadow-2);
+  overscroll-behavior: contain;
+  translate: 0 100%;
+  transition: translate var(--dur-3) var(--ease-emph), overlay var(--dur-3) allow-discrete, display var(--dur-3) allow-discrete;
+}
+dialog.sheet[open] { translate: 0 0; }
+@starting-style { dialog.sheet[open] { translate: 0 100%; } }
+dialog.sheet.is-dragging { transition: none; }
+dialog.sheet::backdrop {
+  background: oklch(0% 0 0 / 0);
+  transition: background-color var(--dur-3), overlay var(--dur-3) allow-discrete, display var(--dur-3) allow-discrete;
+}
+dialog.sheet[open]::backdrop { background: oklch(0% 0 0 / .38); }
+@starting-style { dialog.sheet[open]::backdrop { background: oklch(0% 0 0 / 0); } }
+.sheet-grabber { inline-size: 40px; block-size: 5px; border-radius: 3px; background: var(--border); margin: 4px auto 14px; cursor: grab; touch-action: none; }
+.sheet-title { margin: 0 0 16px; font: 700 1.25rem/1.2 var(--font-display); }
+.sheet-actions { display: flex; gap: 10px; justify-content: flex-end; }
+html:has(dialog[open]) { overflow: hidden; }        /* scroll-lock behind the sheet */
+
+.toast {
+  position: fixed; z-index: 40; inset-inline: max(16px, var(--safe-l)) max(16px, var(--safe-r));
+  inset-block-end: calc(var(--tabbar-h) + var(--safe-b) + 16px);
+  margin-inline: auto; max-inline-size: 520px;
+  display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 16px;
+  border-radius: var(--r-m); background: var(--text); color: var(--bg); box-shadow: var(--shadow-2);
+  transition: opacity var(--dur-2), translate var(--dur-2) var(--ease-emph), display var(--dur-2) allow-discrete;
+}
+.toast:not([hidden]) { display: flex !important; }
+@starting-style { .toast { opacity: 0; translate: 0 16px; } }
+.toast-text { flex: 1; font-size: .9375rem; }
+.toast-action { border: 0; background: none; color: var(--primary); font-weight: 700; padding: 8px 10px; border-radius: var(--r-s); cursor: pointer; }
+
+/* ---------- 5. PAGE TRANSITIONS ---------- */
+@view-transition { navigation: auto; }                /* MPA: cross-document transitions (Chrome 126+, Safari 18.2+) */
+::view-transition-old(main), ::view-transition-new(main) { animation-duration: var(--dur-3); animation-timing-function: var(--ease-emph); }
+html:active-view-transition-type(forward)::view-transition-old(main) { animation-name: vt-out-start; }
+html:active-view-transition-type(forward)::view-transition-new(main) { animation-name: vt-in-end; }
+html:active-view-transition-type(back)::view-transition-old(main)    { animation-name: vt-out-end; }
+html:active-view-transition-type(back)::view-transition-new(main)    { animation-name: vt-in-start; }
+@keyframes vt-out-start { to   { translate: calc(var(--dir-x, 1) * -30%) 0; opacity: 0; } }
+@keyframes vt-in-end    { from { translate: calc(var(--dir-x, 1) * 100%) 0; } }
+@keyframes vt-out-end   { to   { translate: calc(var(--dir-x, 1) * 100%) 0; } }
+@keyframes vt-in-start  { from { translate: calc(var(--dir-x, 1) * -30%) 0; opacity: 0; } }
+
+/* ---------- 6. ACCESSIBILITY PREFERENCES ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .appbar, .tabbar { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-contrast: more) { :root { --border: var(--muted); } }
+@media (forced-colors: active) { .tab[aria-current="page"] { outline: 2px solid CanvasText; } }

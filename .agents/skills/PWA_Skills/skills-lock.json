@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "skills": {
+    "pwa": {
+      "source": "claude-dev-suite/claude-dev-suite",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-frameworks/pwa/SKILL.md",
+      "computedHash": "a2249f94385b5e79fe695c94260960bc1f325325d540c32bb5a26ea5e295128c"
+    },
+    "pwa-development": {
+      "source": "alinaqi/maggy",
+      "sourceType": "github",
+      "skillPath": "skills/pwa-development/SKILL.md",
+      "computedHash": "2219041ce92f6361ba77eb06c9a927dc7a1ba48f40ff5132321a29c4154ebc7a"
+    },
+    "pwa-manifest-generator": {
+      "source": "Dicklesworthstone/pi_agent_rust",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": "tests/ext_conformance/artifacts/plugins-community/skills/05-frontend-dev/pwa-manifest-generator/SKILL.md",
+      "computedHash": "be78182a741d046499228dc302bcade6b775427d542d99413123543c951c09de"
+    }
+  }
+}

@@ -1,0 +1,254 @@
+<!doctype html>
+<!--
+  Mira Voice — lab WebRTC softphone (task 0.3). A test tool, not product UI: the real
+  softphone is Mira Desk (task 1.7, AR/EN/FR, design tokens). Used by webrtc.spec.mjs and by hand:
+    cd tests/integration/telephony/webrtc && npm ci && npm run serve   (bundles JsSIP, serves on :8765)
+    open http://127.0.0.1:8765/softphone.html (accept https://<server>:8089 once first)
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mira lab softphone</title>
+    <style>
+      body {
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+        margin: 1.5rem;
+        max-width: 40rem;
+      }
+      fieldset {
+        border: 1px solid #999;
+        margin-block-end: 1rem;
+      }
+      label {
+        display: block;
+        margin-block: 0.25rem;
+      }
+      input {
+        font: inherit;
+        inline-size: 16rem;
+      }
+      #log {
+        white-space: pre-wrap;
+        font:
+          12px/1.4 ui-monospace,
+          monospace;
+        background: #f4f4f4;
+        padding: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Mira lab softphone</h1>
+    <fieldset>
+      <legend>Account</legend>
+      <label>WSS server <input id="wss" placeholder="wss://192.0.2.10:8089" /></label>
+      <label>SIP domain <input id="domain" placeholder="192.0.2.10" /></label>
+      <label>Extension <input id="ext" placeholder="1003" /></label>
+      <label>Password <input id="password" type="password" /></label>
+      <button id="register">Register</button>
+      <span id="state">not registered</span>
+    </fieldset>
+    <fieldset>
+      <legend>Call</legend>
+      <label>Number <input id="target" value="600" /></label>
+      <button id="call">Call</button>
+      <button id="hangup">Hang up</button>
+      <label
+        ><input id="auto" type="checkbox" checked style="inline-size: auto" /> answer incoming calls
+        automatically</label
+      >
+    </fieldset>
+    <audio id="remote" autoplay></audio>
+    <div id="log"></div>
+
+    <script src="vendor/jssip.min.js"></script>
+    <script>
+      const $ = (id) => document.getElementById(id)
+      const log = (m) => {
+        $('log').textContent += new Date().toISOString().slice(11, 23) + ' ' + m + '\n'
+      }
+      let ua = null
+      let session = null
+      let remoteStream = null
+      let toneStream = null // test mode: send a pure tone instead of the microphone
+      let audioCtx = null
+      const pcConfig = { iceServers: [] }
+      const media = () =>
+        toneStream
+          ? { mediaStream: toneStream }
+          : { mediaConstraints: { audio: true, video: false } }
+
+      function makeTone(hz) {
+        audioCtx = audioCtx || new AudioContext()
+        const osc = audioCtx.createOscillator()
+        const gain = audioCtx.createGain()
+        const dest = audioCtx.createMediaStreamDestination()
+        osc.frequency.value = hz
+        gain.gain.value = 0.3
+        osc.connect(gain).connect(dest)
+        osc.start()
+        return dest.stream
+      }
+
+      function attach(s) {
+        session = s
+        s.on('peerconnection', ({ peerconnection }) => {
+          peerconnection.addEventListener('track', (e) => {
+            remoteStream = e.streams[0]
+            $('remote').srcObject = remoteStream
+          })
+        })
+        s.on('confirmed', () => log('call confirmed'))
+        s.on('ended', (e) => {
+          log('call ended: ' + e.cause)
+          session = null
+        })
+        s.on('failed', (e) => {
+          log('call failed: ' + e.cause)
+          session = null
+        })
+      }
+
+      window.mira = {
+        start({ wss, domain, ext, password, toneHz }) {
+          if (toneHz) toneStream = makeTone(toneHz)
+          return new Promise((resolve, reject) => {
+            ua = new JsSIP.UA({
+              sockets: [new JsSIP.WebSocketInterface(wss)],
+              uri: `sip:${ext}@${domain}`,
+              password,
+              register: true,
+              session_timers: false,
+            })
+            ua.on('registered', () => {
+              $('state').textContent = 'registered'
+              log('registered ' + ext)
+              resolve(true)
+            })
+            ua.on('registrationFailed', (e) => {
+              $('state').textContent = 'failed'
+              log('registration failed: ' + e.cause)
+              reject(new Error(e.cause))
+            })
+            ua.on('newRTCSession', ({ originator, session: s }) => {
+              if (originator !== 'remote') return
+              log('incoming call from ' + s.remote_identity.uri.user)
+              attach(s)
+              if ($('auto').checked) s.answer({ ...media(), pcConfig })
+            })
+            ua.start()
+          })
+        },
+        call(target) {
+          return new Promise((resolve, reject) => {
+            const domain = ua.configuration.uri.host
+            const s = ua.call(`sip:${target}@${domain}`, { ...media(), pcConfig })
+            attach(s)
+            s.on('confirmed', () => resolve(true))
+            s.on('failed', (e) => reject(new Error(e.cause)))
+          })
+        },
+        waitForCall(ms = 20000) {
+          return new Promise((resolve, reject) => {
+            const t0 = Date.now()
+            const tick = () => {
+              if (session && session.isEstablished()) return resolve(true)
+              if (Date.now() - t0 > ms) return reject(new Error('no established call'))
+              setTimeout(tick, 200)
+            }
+            tick()
+          })
+        },
+        async stats() {
+          const out = { inbound: null, outbound: null }
+          if (!session || !session.connection) return out
+          const report = await session.connection.getStats()
+          report.forEach((r) => {
+            if (r.kind !== 'audio') return
+            if (r.type === 'inbound-rtp')
+              out.inbound = {
+                packetsReceived: r.packetsReceived,
+                bytesReceived: r.bytesReceived,
+                packetsLost: r.packetsLost,
+                totalAudioEnergy: r.totalAudioEnergy,
+                jitter: r.jitter,
+              }
+            if (r.type === 'outbound-rtp')
+              out.outbound = { packetsSent: r.packetsSent, bytesSent: r.bytesSent }
+          })
+          return out
+        },
+        // Dominant frequency (Hz) and level (dBFS) of what we receive from the far end.
+        async remoteTone(ms = 1500) {
+          // read straight from the peer connection's receivers (the 'track' event can fire
+          // inside ua.call(), before a listener is attached)
+          const pc = session && session.connection
+          const tracks = pc
+            ? pc
+                .getReceivers()
+                .map((r) => r.track)
+                .filter((t) => t && t.kind === 'audio')
+            : []
+          if (!tracks.length) return { hz: 0, db: -200, diag: 'no remote audio track' }
+          remoteStream = new MediaStream(tracks)
+          if (!$('remote').srcObject) $('remote').srcObject = remoteStream
+          audioCtx = audioCtx || new AudioContext()
+          await audioCtx.resume()
+          const src = audioCtx.createMediaStreamSource(remoteStream)
+          const an = audioCtx.createAnalyser()
+          an.fftSize = 8192
+          src.connect(an)
+          await new Promise((r) => setTimeout(r, ms))
+          const freq = new Float32Array(an.frequencyBinCount)
+          an.getFloatFrequencyData(freq)
+          let peak = 0
+          for (let i = 1; i < freq.length; i++) if (freq[i] > freq[peak]) peak = i
+          src.disconnect()
+          const track = remoteStream.getAudioTracks()[0]
+          return {
+            hz: Math.round((peak * audioCtx.sampleRate) / an.fftSize),
+            db: Math.round(freq[peak]),
+            diag: {
+              ctx: audioCtx.state,
+              playing: !$('remote').paused,
+              track: track ? `${track.readyState}/muted=${track.muted}` : 'none',
+            },
+          }
+        },
+        // resolves when the current call has ended (e.g. the far end hung up)
+        waitForEnd(ms = 8000) {
+          return new Promise((resolve, reject) => {
+            const t0 = Date.now()
+            const tick = () => {
+              if (!session || session.isEnded()) return resolve(true)
+              if (Date.now() - t0 > ms) return reject(new Error('call did not end'))
+              setTimeout(tick, 200)
+            }
+            tick()
+          })
+        },
+        hangup() {
+          if (session) session.terminate()
+        },
+        stop() {
+          if (ua) ua.stop()
+        },
+      }
+
+      $('register').onclick = () =>
+        window.mira
+          .start({
+            wss: $('wss').value,
+            domain: $('domain').value,
+            ext: $('ext').value,
+            password: $('password').value,
+          })
+          .catch(() => {})
+      $('call').onclick = () => window.mira.call($('target').value).catch(() => {})
+      $('hangup').onclick = () => window.mira.hangup()
+    </script>
+  </body>
+</html>

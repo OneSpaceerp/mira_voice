@@ -1,0 +1,12 @@
+{
+  "name": "mira-design-tokens-browser-test",
+  "private": true,
+  "description": "Mira Voice: design tokens behave in a real browser (themes, OS dark mode, RTL, reduced motion, focus)",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
+  }
+}

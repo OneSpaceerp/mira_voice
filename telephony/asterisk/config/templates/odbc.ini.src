@@ -1,0 +1,10 @@
+; Mira Voice — ODBC data source for Asterisk realtime. Rendered to /etc/odbc.ini by entrypoint.sh.
+; Asterisk reads PJSIP objects from read-only views in schema "asterisk" (Mira Core migration 0002).
+[mira]
+Description = Mira Core database (read-only views for Asterisk)
+Driver      = PostgreSQL Unicode
+Servername  = 127.0.0.1
+Port        = 5432
+Database    = ${POSTGRES_DB}
+SSLmode     = disable
+ReadOnly    = 1

@@ -1,0 +1,11 @@
+; Mira Voice — ODBC connection for realtime. Rendered by entrypoint.sh.
+; Role "asterisk" can only SELECT the views in schema "asterisk" (created by `mira-core ensure-db-roles`).
+[asterisk]
+enabled = yes
+dsn = mira
+username = asterisk
+password = ${ASTERISK_DB_PASSWORD}
+pre-connect = yes
+max_connections = 10
+sanitysql = select 1
+connect_timeout = 5

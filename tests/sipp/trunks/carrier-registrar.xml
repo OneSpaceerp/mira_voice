@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<!--
+  Mira Voice test: a carrier registrar (like WE). The first REGISTER is challenged with digest
+  auth, the second one's password is checked (200 OK or 403). After that every refresh gets
+  200 OK, like a registrar that keeps the binding. Placeholders @USER@ / @PASS@ are filled in
+  by trunk-calls.sh. Run with -aa so Asterisk's OPTIONS keepalives get a 200 OK
+  automatically. It never ends on its own: the test stops it.
+-->
+<scenario name="carrier registrar">
+  <recv request="REGISTER" />
+
+  <send>
+    <![CDATA[
+
+      SIP/2.0 401 Unauthorized
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      WWW-Authenticate: Digest realm="carrier.test", nonce="5f2b7c0e9d8a4b3c2e1f0a9b8c7d6e5f", algorithm=MD5
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv request="REGISTER">
+    <action>
+      <verifyauth assign_to="authvalid" username="@USER@" password="@PASS@" />
+    </action>
+  </recv>
+
+  <nop hide="true" test="authvalid" next="2" />
+
+  <send next="9">
+    <![CDATA[
+
+      SIP/2.0 403 Wrong Password
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <label id="2" />
+  <send>
+    <![CDATA[
+
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      [last_Contact:]
+      Expires: 600
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <!-- refreshes after a successful registration -->
+  <label id="3" />
+  <recv request="REGISTER" />
+  <send next="3">
+    <![CDATA[
+
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      [last_Contact:]
+      Expires: 600
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <label id="9" />
+</scenario>

@@ -1,0 +1,131 @@
+/* Mira Desk — base layer. Import once, after tokens.css:
+     import './styles/tokens.css'
+     import './styles/base.css'
+   Every value is a token (design-system/2-token-architecture.md). Logical properties only,
+   so Arabic (dir="rtl") mirrors without extra CSS. Hand-written; tokens.css is generated. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-block-size: 100dvh;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--type-body-family);
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-line);
+  font-weight: var(--type-body-weight);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Arabic: IBM Plex Sans Arabic and the Arabic sizes (set <html lang="ar" dir="rtl">). */
+:lang(ar) body {
+  font-family: var(--type-ar-body-family);
+  font-size: var(--type-ar-body-size);
+  line-height: var(--type-ar-body-line);
+}
+
+/* Phone numbers, timers, extensions and the dial pad stay left-to-right in every language. */
+.mv-ltr,
+input[type='tel'],
+time,
+.mv-number,
+.mv-timer {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.mv-number {
+  font-family: var(--type-number-family);
+  font-size: var(--type-number-size);
+  line-height: var(--type-number-line);
+  font-weight: var(--type-number-weight);
+  font-variant-numeric: tabular-nums;
+}
+
+.mv-timer {
+  font-family: var(--type-timer-family);
+  font-size: var(--type-timer-size);
+  line-height: var(--type-timer-line);
+  font-weight: var(--type-timer-weight);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Text roles (same names as the tokens). Arabic pages use the ar-* roles for long text. */
+.mv-title {
+  font: var(--type-title-weight) var(--type-title-size) / var(--type-title-line)
+    var(--type-title-family);
+  letter-spacing: var(--type-title-tracking);
+}
+.mv-heading {
+  font: var(--type-heading-weight) var(--type-heading-size) / var(--type-heading-line)
+    var(--type-heading-family);
+  letter-spacing: var(--type-heading-tracking);
+}
+.mv-label {
+  font: var(--type-label-weight) var(--type-label-size) / var(--type-label-line)
+    var(--type-label-family);
+  letter-spacing: var(--type-label-tracking);
+}
+.mv-caption {
+  font: var(--type-caption-weight) var(--type-caption-size) / var(--type-caption-line)
+    var(--type-caption-family);
+  letter-spacing: var(--type-caption-tracking);
+  color: var(--ink-muted);
+}
+:lang(ar) .mv-title {
+  font: var(--type-ar-title-weight) var(--type-ar-title-size) / var(--type-ar-title-line)
+    var(--type-ar-title-family);
+}
+:lang(ar) .mv-caption {
+  font: var(--type-ar-caption-weight) var(--type-ar-caption-size) / var(--type-ar-caption-line)
+    var(--type-ar-caption-family);
+}
+
+/* Focus: 2 px ring with a 2 px gap in the surface colour — never removed. */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Touch screens: no control smaller than the touch minimum. */
+@media (pointer: coarse) {
+  button,
+  [role='button'],
+  input,
+  select {
+    min-block-size: var(--touch-min);
+  }
+}
+
+/* Calm by default: honour reduced motion everywhere; nothing in Mira flashes or pulses. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Wallboards are always dark, whatever the app theme. */
+.mv-wallboard {
+  background: var(--wallboard-bg);
+  color-scheme: dark;
+}
+
+::selection {
+  background: var(--mira-red-soft);
+  color: var(--ink);
+}

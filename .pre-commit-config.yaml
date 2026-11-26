@@ -1,0 +1,66 @@
+# pre-commit hooks for Mira Voice (pre-commit.com). Versions are recorded in docs/stack-versions.md.
+# Install once:  pipx install pre-commit   (or: uv tool install pre-commit)
+# Enable:        pre-commit install
+# Run on all:    pre-commit run --all-files
+minimum_pre_commit_version: '4.0.0'
+
+# Vendored skills, the given study and the brand files are not reformatted by us.
+# design-system/tokens.json and design-system/tools/ ARE checked (token source + generator).
+exclude: ^(\.agents/|\.claude/|docs/study/|design-system/(components/|[^/]+\.md$|tokens\.css$))
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-executables-have-shebangs
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+      - id: detect-private-key
+
+  # Python: lint (with safe fixes) then format. Config: ruff.toml (connect/ overrides with its own).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.6
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # Shell scripts (deploy/*.sh). shellcheck-py ships the ShellCheck binary as a wheel, so no
+  # Docker is needed (the official koalaman/shellcheck-precommit hook runs in Docker).
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        args: [--external-sources]
+
+  # Prettier: pre-commit/mirrors-prettier is archived, so run Prettier as a local node hook
+  # pinned to an exact npm version. Markdown is left out on purpose: Prettier pads every table
+  # cell to the widest one, which makes the docs unreadable as plain text.
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier
+        entry: prettier --write --ignore-unknown
+        language: node
+        additional_dependencies: ['prettier@3.10.1']
+        types_or: [javascript, ts, vue, css, scss, json, yaml, html]
+
+  # Design tokens: generated files must match design-system/tokens.json (needs Node 24).
+  - repo: local
+    hooks:
+      - id: design-tokens
+        name: design tokens up to date
+        entry: node design-system/tools/build-tokens.mjs --check
+        language: system
+        pass_filenames: false
+        files: ^(design-system/tokens\.json|design-system/tools/|desk/src/styles/tokens\.|phone/packages/mira_design/lib/src/mira_tokens\.g\.dart)

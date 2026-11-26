@@ -1,0 +1,12 @@
+{
+  "enabledMcpjsonServers": ["context7"],
+  "permissions": {
+    "allow": [
+      "mcp__context7"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./**/.env)"
+    ]
+  }
+}

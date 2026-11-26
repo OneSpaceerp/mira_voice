@@ -1,0 +1,243 @@
+# Mira Voice — service stack, installed to /opt/mira/docker-compose.yml by deploy/install.sh
+# and run by mira.service. Values like ${MIRA_LOCAL_IP} come from /opt/mira/.env.
+#
+# Networking rule (deploy/README.md): Docker-published ports bypass ufw, so the telephony
+# services use host networking (ufw applies) and internal services bind to 127.0.0.1 only.
+#
+# Images are built locally by install.sh (docker-compose.build.yml); pull_policy: never keeps
+# Compose from looking for them on Docker Hub.
+name: mira
+
+x-hardening: &hardening
+  restart: unless-stopped
+  network_mode: host
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: '20m'
+      max-file: '5'
+
+x-core-env: &core-env
+  POSTGRES_HOST: 127.0.0.1
+  POSTGRES_PORT: '5432'
+  POSTGRES_USER: ${POSTGRES_USER:?run install.sh}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run install.sh}
+  POSTGRES_DB: ${POSTGRES_DB:?run install.sh}
+  MIRA_JWT_SECRET: ${MIRA_JWT_SECRET:?run install.sh}
+  ARI_USER: ${ARI_USER:?run install.sh}
+  ARI_PASSWORD: ${ARI_PASSWORD:?run install.sh}
+  ASTERISK_DB_PASSWORD: ${ASTERISK_DB_PASSWORD:?run install.sh}
+  # carrier passwords are encrypted with this key (Fernet); losing it loses them
+  MIRA_DATA_KEY: ${MIRA_DATA_KEY:?run install.sh}
+  KAMAILIO_RPC_TOKEN: ${KAMAILIO_RPC_TOKEN:?run install.sh}
+  MIRA_ASTERISK_CONFIG_GID: '2701'
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?run install.sh}
+
+# Mira Core writes the telephony config here; Asterisk / Kamailio read it (read-only)
+x-core-generated: &core-generated
+  - asterisk-generated:/var/lib/mira/asterisk
+  - kamailio-generated:/var/lib/mira/kamailio
+  # prompt recordings uploaded through the API (task 1.4); Asterisk plays them read-only
+  - prompts:/var/lib/mira/prompts
+
+services:
+  # ---------------- data ----------------
+  postgres:
+    <<: *hardening
+    image: postgres:16.16-trixie
+    command: ['postgres', '-c', 'listen_addresses=127.0.0.1']
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?run install.sh}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run install.sh}
+      POSTGRES_DB: ${POSTGRES_DB:?run install.sh}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Live state (active calls) + event fan-out. Valkey = the BSD-licensed Redis fork (ADR 0008).
+  # Loopback only, password from .env, no persistence: Mira Core rebuilds it from Asterisk.
+  valkey:
+    <<: *hardening
+    image: valkey/valkey:9.1.4-trixie
+    user: valkey
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?run install.sh}
+    # the password goes into a config file, not onto the command line (visible in `ps`)
+    command:
+      - sh
+      - -c
+      - >-
+        printf 'requirepass "%s"\n' "$$REDIS_PASSWORD" > /tmp/valkey.conf &&
+        exec valkey-server /tmp/valkey.conf --bind 127.0.0.1 --port 6379
+        --protected-mode yes --save '' --appendonly no
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'REDISCLI_AUTH="$$REDIS_PASSWORD" valkey-cli -h 127.0.0.1 ping | grep -q PONG',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ---------------- Mira Core ----------------
+  core-migrate:
+    <<: *hardening
+    restart: 'no'
+    image: mira/core:0.1.0
+    pull_policy: never
+    # schema, the read-only role Asterisk uses for realtime, then the generated config files
+    # (so Asterisk and Kamailio find them at their first start; reloads fail harmlessly here)
+    command:
+      ['sh', '-c', 'alembic upgrade head && mira-core ensure-db-roles && mira-core render-config']
+    environment: *core-env
+    volumes: *core-generated
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  core:
+    <<: *hardening
+    image: mira/core:0.1.0
+    pull_policy: never
+    environment: *core-env
+    volumes: *core-generated
+    depends_on:
+      core-migrate:
+        condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+
+  # ARI event worker: call records, call events, live state (task 1.3). One per Asterisk node.
+  core-events:
+    <<: *hardening
+    image: mira/core:0.1.0
+    pull_policy: never
+    command: ['mira-core', 'call-events']
+    environment: *core-env
+    # healthy = connected to Asterisk's event stream in the last minute
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'test -n "$$(find /tmp/mira-ari-connected -newermt "-60 seconds" 2>/dev/null)"',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      core-migrate:
+        condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+      asterisk:
+        condition: service_healthy
+
+  # Mira Flow engine: runs IVR flows on the calls Asterisk sends to Stasis(mira-ivr) (task 1.4)
+  core-ivr:
+    <<: *hardening
+    image: mira/core:0.1.0
+    pull_policy: never
+    command: ['mira-core', 'ivr']
+    environment:
+      <<: *core-env
+      # data dips may reach the LAN (ERPNext); Mira Cloud sets this to 'false'
+      MIRA_FLOW_HTTP_ALLOW_PRIVATE: ${MIRA_FLOW_HTTP_ALLOW_PRIVATE:-true}
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'test -n "$$(find /tmp/mira-ari-connected -newermt "-60 seconds" 2>/dev/null)"',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      core-migrate:
+        condition: service_completed_successfully
+      asterisk:
+        condition: service_healthy
+
+  # ---------------- telephony ----------------
+  rtpengine:
+    <<: *hardening
+    image: mira/rtpengine:26.0.1.29
+    pull_policy: never
+    environment:
+      MIRA_LOCAL_IP: ${MIRA_LOCAL_IP:?run install.sh}
+      MIRA_PUBLIC_IP: ${MIRA_PUBLIC_IP:?run install.sh}
+
+  asterisk:
+    <<: *hardening
+    image: mira/asterisk:22.12.0
+    pull_policy: never
+    environment:
+      ARI_USER: ${ARI_USER:?run install.sh}
+      ARI_PASSWORD: ${ARI_PASSWORD:?run install.sh}
+      POSTGRES_DB: ${POSTGRES_DB:?run install.sh}
+      ASTERISK_DB_PASSWORD: ${ASTERISK_DB_PASSWORD:?run install.sh}
+    volumes:
+      - ./config/asterisk:/run/mira-config/asterisk:ro
+      - asterisk-generated:/etc/asterisk/generated:ro
+      # tenants' prompts: sound:mira/<tenant>/<prompt> (language directory inside)
+      - prompts:/var/lib/asterisk/sounds/mira:ro
+      # voicemail messages (ARI recordings), kept across container rebuilds
+      - voicemail:/var/spool/asterisk/recording
+      - ./recordings:/var/spool/asterisk/monitor
+      - asterisk-lib:/var/lib/asterisk/astdb
+    depends_on:
+      core-migrate:
+        condition: service_completed_successfully
+    ulimits:
+      nofile: 65536
+
+  kamailio:
+    <<: *hardening
+    image: mira/kamailio:6.1.6
+    pull_policy: never
+    depends_on:
+      core-migrate:
+        condition: service_completed_successfully
+      asterisk:
+        condition: service_healthy
+      rtpengine:
+        condition: service_healthy
+    environment:
+      MIRA_LOCAL_IP: ${MIRA_LOCAL_IP:?run install.sh}
+      MIRA_PUBLIC_IP: ${MIRA_PUBLIC_IP:?run install.sh}
+      MIRA_SIP_DOMAIN: ${MIRA_SIP_DOMAIN:?run install.sh}
+      # JSON-RPC on 127.0.0.1:8095 (Mira Core reloads the carrier list) needs this token
+      KAMAILIO_RPC_TOKEN: ${KAMAILIO_RPC_TOKEN:?run install.sh}
+    volumes:
+      - ./config/tls:/run/mira-config/tls:ro
+      - kamailio-generated:/etc/kamailio/generated:ro
+    ulimits:
+      nofile: 65536
+
+  coturn:
+    <<: *hardening
+    image: mira/coturn:4.19.2
+    pull_policy: never
+    environment:
+      MIRA_LOCAL_IP: ${MIRA_LOCAL_IP:?run install.sh}
+      MIRA_PUBLIC_IP: ${MIRA_PUBLIC_IP:?run install.sh}
+      MIRA_SIP_DOMAIN: ${MIRA_SIP_DOMAIN:?run install.sh}
+      TURN_SECRET: ${TURN_SECRET:?run install.sh}
+
+volumes:
+  asterisk-lib:
+  asterisk-generated:
+  kamailio-generated:
+  prompts:
+  voicemail:
+  postgres-data:

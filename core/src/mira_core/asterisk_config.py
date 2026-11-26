@@ -1,0 +1,743 @@
+"""Telephony configuration generated from the database (tasks 1.1 and 1.2, ADR 0006 / 0007).
+
+- Extensions (PJSIP endpoint/AOR/auth): Asterisk reads them live from read-only views (realtime).
+- Everything else is rendered here and reloaded only when it changed:
+    extensions_mira.conf  dialplan: per tenant, extensions + outbound routes (trunk failover,
+                          caller ID); inbound contexts mapping DIDs to extensions   -> pbx_config
+    pjsip_mira.conf       trunks: endpoint, AOR, header identification, outbound auth
+                          (decrypted carrier password), registration, GSM gateway    -> res_pjsip
+    dispatcher.list       Kamailio: Asterisk node + carrier IPs (trunk identification) -> Kamailio
+- Asterisk files go to a volume shared with Asterisk only (0640, group mira-config); the
+  Kamailio list to a volume shared with Kamailio only.
+
+Only validated identifiers reach these files (digits, SIP usernames, UUID-based ids, hostnames,
+IPs); free text (names) never does. Carrier passwords are checked for characters that would
+break the config syntax and escaped.
+"""
+
+import asyncio
+import contextlib
+import ipaddress
+import logging
+import os
+import re
+import tempfile
+import uuid
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import httpx
+import jinja2
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from mira_core import crypto
+from mira_core.config import Settings
+from mira_core.models import (
+    Extension,
+    InboundRoute,
+    IvrFlow,
+    OutboundRoute,
+    OutboundRouteTrunk,
+    Tenant,
+    TenantStatus,
+    Trunk,
+    TrunkKind,
+    User,
+)
+
+log = logging.getLogger(__name__)
+
+DIALPLAN_FILE = "extensions_mira.conf"
+IVR_APP = "mira-ivr"  # Stasis application of the Mira Flow engine (mira-core ivr)
+PJSIP_FILE = "pjsip_mira.conf"
+DISPATCHER_FILE = "dispatcher.list"
+_ADVISORY_LOCK = 7_101_001  # pg_advisory_xact_lock key: one config writer at a time
+_SAFE = re.compile(r"^[a-z0-9_-]+$")
+_PATTERN = re.compile(r"^[0-9XZN.!+*#\[\]-]{1,32}$")
+_DIGITS = re.compile(r"^\+?[0-9]{1,20}$")
+_HOST = re.compile(r"^[A-Za-z0-9.-]{1,253}$")
+_FLOW_ID = re.compile(r"^[0-9a-f]{32}$")
+_USER = re.compile(r"^[A-Za-z0-9._+-]{1,128}$")
+
+
+def tenant_context(tenant_id: uuid.UUID) -> str:
+    """Dialplan context of a tenant. Must match TENANT_CONTEXT in migrations 0002/0003."""
+    return "t_" + tenant_id.hex
+
+
+def inbound_context(tenant_id: uuid.UUID, trunk_id: uuid.UUID | None = None) -> str:
+    base = tenant_context(tenant_id) + "_in"
+    return base if trunk_id is None else f"{base}_{trunk_id.hex}"
+
+
+# ----------------------------------------------------------------------------- data
+
+
+@dataclass
+class DialplanExtension:
+    number: str
+    endpoint: str
+
+
+@dataclass
+class RouteStep:
+    trunk: str  # Asterisk endpoint id of the trunk
+    caller_id: str  # number to present, "" = keep the caller's
+
+
+@dataclass
+class DialplanRoute:
+    pattern: str
+    strip: int
+    prepend: str
+    steps: list[RouteStep]
+
+
+@dataclass
+class DialplanInbound:
+    did: str  # digits, or "*" for any number
+    destination: str  # extension number ("" when the call goes to a flow)
+    flow: str = ""  # Mira Flow id (hex) run by the IVR engine instead
+
+
+@dataclass
+class DialplanFlow:
+    number: str  # internal number that runs the flow
+    flow: str  # flow id (hex)
+
+
+@dataclass
+class DialplanTrunk:
+    endpoint: str
+    context: str
+    inbound: list[DialplanInbound] = field(default_factory=list)
+
+
+@dataclass
+class DialplanTenant:
+    slug: str
+    context: str
+    extensions: list[DialplanExtension] = field(default_factory=list)
+    routes: list[DialplanRoute] = field(default_factory=list)
+    inbound_context: str = ""
+    inbound: list[DialplanInbound] = field(default_factory=list)
+    trunks: list[DialplanTrunk] = field(default_factory=list)
+    flows: list[DialplanFlow] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.inbound_context:
+            self.inbound_context = self.context + "_in"
+
+
+@dataclass
+class PjsipTrunk:
+    endpoint: str
+    kind: TrunkKind
+    tenant_id: uuid.UUID
+    context: str
+    language: str
+    host: str
+    port: int
+    transport: str
+    auth_username: str | None
+    secret: str | None  # decrypted carrier password (never logged)
+    from_domain: str | None
+    sip_ha1: str | None
+    inbound_ips: list[str]
+
+
+# ----------------------------------------------------------------------------- rendering
+
+_env = jinja2.Environment(
+    undefined=jinja2.StrictUndefined,
+    # Asterisk / Kamailio config, not HTML: escaping would corrupt it. Injection is prevented
+    # by validating every value before rendering.
+    autoescape=False,  # noqa: S701
+    trim_blocks=True,
+    lstrip_blocks=True,
+    keep_trailing_newline=True,
+)
+
+_HEADER = "; GENERATED by Mira Core from the database ({{ generated_at }}). Do not edit:\n"
+
+# A DID goes to an extension (Goto into the tenant context) or into the IVR engine (Stasis).
+_INBOUND_LINES = (
+    """\
+{% for i in items %}
+{% set action %}{% if i.flow %}Stasis("""
+    + IVR_APP
+    + """,{{ i.flow }}){% else %}\
+Goto({{ ctx }},{{ i.destination }},1){% endif %}{% endset %}
+{% for pattern in (["_X.", "_+X."] if i.did == "*" else [i.did]) %}
+exten => {{ pattern }},1,{{ action }}
+ same => n,Hangup()
+{% endfor %}
+{% endfor %}
+"""
+)
+
+_DIALPLAN = _env.from_string(
+    _HEADER
+    + "; every change is overwritten. Manage extensions, trunks and routes through the Mira API.\n"
+    + """\
+{% macro inbound(items, ctx) %}"""
+    + _INBOUND_LINES
+    + """{% endmacro %}
+{% for t in tenants %}
+
+; ---- tenant {{ t.slug }} ----
+[{{ t.context }}]
+{% for e in t.extensions %}
+exten => {{ e.number }},1,Gosub(mira-dial-extension,s,1({{ e.endpoint }}))
+ same => n,Hangup()
+{% endfor %}
+{% for f in t.flows %}
+exten => {{ f.number }},1,Stasis("""
+    + IVR_APP
+    + """,{{ f.flow }})
+ same => n,Hangup()
+{% endfor %}
+{% for r in t.routes %}
+exten => _{{ r.pattern }},1,Gosub(mira-outbound,s,1({{ r.prepend }}${EXTEN:{{ r.strip }}}\
+{% for s in r.steps %},{{ s.trunk }},{{ s.caller_id }}{% endfor %}))
+ same => n,Hangup()
+{% endfor %}
+exten => _X.,1,Gosub(mira-unknown-number,s,1)
+exten => i,1,Hangup()
+
+; calls arriving on any trunk of {{ t.slug }}
+[{{ t.inbound_context }}]
+{{ inbound(t.inbound, t.context) }}\
+{% if not t.inbound | selectattr("did", "equalto", "*") | list %}
+exten => _X.,1,Gosub(mira-unknown-number,s,1)
+exten => _+X.,1,Gosub(mira-unknown-number,s,1)
+{% endif %}
+{% for k in t.trunks %}
+
+[{{ k.context }}]
+{{ inbound(k.inbound, t.context) }}\
+include => {{ t.inbound_context }}
+{% endfor %}
+{% endfor %}
+"""
+)
+
+_PJSIP = _env.from_string(
+    _HEADER
+    + """\
+; Trunks. Contains carrier passwords: readable by Asterisk only.
+{% for k in trunks %}
+
+; ---- {{ k.kind.value }} {{ k.endpoint }} (tenant {{ k.tenant_id }}) ----
+[{{ k.endpoint }}]
+type = endpoint
+transport = transport-kamailio
+context = {{ k.context }}
+disallow = all
+allow = ulaw,alaw,g722
+direct_media = no
+rtp_symmetric = no
+force_rport = no
+rewrite_contact = no
+ice_support = no
+media_encryption = no
+media_address = 127.0.0.1
+bind_rtp_to_media_address = yes
+dtmf_mode = rfc4733
+send_pai = yes
+trust_id_inbound = yes
+language = {{ k.language }}
+tenantid = {{ k.tenant_id }}
+aors = {{ k.endpoint }}
+{% if k.kind.value == "gsm_gateway" %}
+auth = {{ k.endpoint }}-in
+{% else %}
+outbound_proxy = sip:127.0.0.1:5060\\;lr
+{% if k.from_domain %}
+from_domain = {{ k.from_domain }}
+{% endif %}
+{% if k.secret %}
+outbound_auth = {{ k.endpoint }}-out
+{% endif %}
+{% endif %}
+
+[{{ k.endpoint }}]
+type = aor
+{% if k.kind.value == "gsm_gateway" %}
+max_contacts = 1
+remove_existing = yes
+remove_unavailable = yes
+qualify_frequency = 30
+support_path = yes
+
+[{{ k.endpoint }}-in]
+type = auth
+auth_type = digest
+username = {{ k.endpoint }}
+realm = mira
+password_digest = MD5:{{ k.sip_ha1 }}
+{% else %}
+contact = sip:{{ k.host }}:{{ k.port }}{% if k.transport != "udp" %}\\;transport={{ k.transport }}{% endif %}
+
+qualify_frequency = 60
+
+; calls from this carrier: Kamailio recognises its IP and adds this header
+[{{ k.endpoint }}-identify]
+type = identify
+endpoint = {{ k.endpoint }}
+match_header = X-Mira-Trunk: {{ k.endpoint }}
+{% if k.secret %}
+
+[{{ k.endpoint }}-out]
+type = auth
+auth_type = digest
+username = {{ k.auth_username }}
+password = {{ k.secret }}
+{% endif %}
+{% if k.kind.value == "sip_register" %}
+
+[{{ k.endpoint }}-reg]
+type = registration
+transport = transport-kamailio
+outbound_proxy = sip:127.0.0.1:5060\\;lr
+server_uri = sip:{{ k.host }}:{{ k.port }}{% if k.transport != "udp" %}\\;transport={{ k.transport }}{% endif %}
+
+client_uri = sip:{{ k.auth_username }}@{{ k.from_domain or k.host }}
+contact_user = {{ k.endpoint }}
+outbound_auth = {{ k.endpoint }}-out
+; no "endpoint =" here: Asterisk 22 then requires line support; calls from the carrier are
+; matched by the X-Mira-Trunk header Kamailio adds (identify above)
+expiration = 600
+retry_interval = 60
+forbidden_retry_interval = 600
+fatal_retry_interval = 600
+max_retries = 100000
+{% endif %}
+{% endif %}
+{% endfor %}
+"""
+)
+
+
+def _check(value: str, regex: re.Pattern[str], what: str) -> str:
+    if not regex.match(value):
+        raise ValueError(f"unsafe {what} for the generated config: {value!r}")
+    return value
+
+
+def conf_value(value: str) -> str:
+    """A free value (carrier password) inside an Asterisk config file: no line breaks or NULs,
+    no surrounding spaces; '\\' and ';' are escaped (';' would start a comment)."""
+    if any(c in value for c in "\r\n\x00") or value != value.strip():
+        raise ValueError("value contains line breaks or surrounding spaces")
+    return value.replace("\\", "\\\\").replace(";", "\\;")
+
+
+def _stamp(generated_at: datetime | None) -> str:
+    return (generated_at or datetime.now(UTC)).strftime("%Y-%m-%d %H:%M:%SZ")
+
+
+def render_dialplan(tenants: list[DialplanTenant], generated_at: datetime | None = None) -> str:
+    for t in tenants:
+        for value in [t.slug, t.context, *(e.endpoint for e in t.extensions)]:
+            _check(value, _SAFE, "identifier")
+        _check(t.inbound_context, _SAFE, "context")
+        for e in t.extensions:
+            if not e.number.isdigit():
+                raise ValueError(f"extension number must be digits: {e.number!r}")
+        for r in t.routes:
+            _check(r.pattern, _PATTERN, "route pattern")
+            if r.prepend:
+                _check(r.prepend, _DIGITS, "prepend")
+            if not 0 <= r.strip <= 20:
+                raise ValueError("strip out of range")
+            for s in r.steps:
+                _check(s.trunk, _SAFE, "trunk")
+                if s.caller_id:
+                    _check(s.caller_id, _DIGITS, "caller ID")
+        for k in t.trunks:
+            _check(k.context, _SAFE, "context")
+        for i in [*t.inbound, *(i for k in t.trunks for i in k.inbound)]:
+            if i.did != "*":
+                _check(i.did, _DIGITS, "DID")
+            if i.flow:
+                _check(i.flow, _FLOW_ID, "flow id")
+            elif not i.destination.isdigit():
+                raise ValueError(f"destination must be digits: {i.destination!r}")
+        for f in t.flows:
+            _check(f.flow, _FLOW_ID, "flow id")
+            if not f.number.isdigit():
+                raise ValueError(f"flow number must be digits: {f.number!r}")
+    return _DIALPLAN.render(tenants=tenants, generated_at=_stamp(generated_at))
+
+
+def render_pjsip(trunks: list[PjsipTrunk], generated_at: datetime | None = None) -> str:
+    safe: list[PjsipTrunk] = []
+    for k in trunks:
+        _check(k.endpoint, _SAFE, "trunk id")
+        _check(k.context, _SAFE, "context")
+        if k.kind is TrunkKind.GSM_GATEWAY:
+            if not (k.sip_ha1 and re.fullmatch(r"[0-9a-f]{32}", k.sip_ha1)):
+                raise ValueError(f"{k.endpoint}: GSM gateway without credentials")
+        else:
+            _check(k.host, _HOST, "host")
+            if k.from_domain:
+                _check(k.from_domain, _HOST, "from_domain")
+            if k.auth_username:
+                _check(k.auth_username, _USER, "auth username")
+            if k.kind is TrunkKind.SIP_REGISTER and not (k.auth_username and k.secret):
+                raise ValueError(f"{k.endpoint}: a registering trunk needs a username and password")
+        if k.transport not in ("udp", "tcp", "tls") or not 1 <= k.port <= 65535:
+            raise ValueError(f"{k.endpoint}: bad transport/port")
+        safe.append(replace(k, secret=conf_value(k.secret) if k.secret else None))
+    return _PJSIP.render(trunks=safe, generated_at=_stamp(generated_at))
+
+
+def render_dispatcher(trunks: list[PjsipTrunk], generated_at: datetime | None = None) -> str:
+    """Kamailio dispatcher list: set 1 = Asterisk nodes (pinged), set 2 = carrier
+    signalling IPs (flag 32: never pinged) carrying the trunk id Kamailio adds as X-Mira-Trunk."""
+    lines = [
+        f"# GENERATED by Mira Core from the database ({_stamp(generated_at)}). Do not edit.",
+        "# setid destination flags priority attributes",
+        "1 sip:127.0.0.1:5080 0 0 duid=asterisk-1",
+    ]
+    seen: set[str] = set()
+    for k in trunks:
+        if k.kind is TrunkKind.GSM_GATEWAY:
+            continue  # gateways register and authenticate; no IP identity
+        _check(k.endpoint, _SAFE, "trunk id")
+        ips = list(k.inbound_ips)
+        with contextlib.suppress(ValueError):  # a literal-IP host is also a source
+            ips.append(str(ipaddress.ip_address(k.host)))
+        for raw in dict.fromkeys(ips):
+            ip = str(ipaddress.ip_address(raw))  # raises on anything that is not an IP
+            if ip in seen:
+                raise ValueError(f"carrier IP {ip} belongs to two trunks")
+            seen.add(ip)
+            lines.append(f"2 sip:{ip} 32 0 duid={k.endpoint};trunk={k.endpoint}")
+    return "\n".join(lines) + "\n"
+
+
+# ----------------------------------------------------------------------------- loading
+
+
+def _language(tenant: Tenant) -> str:
+    # Installed prompts: English and French. Arabic prompts come with the IVR prompt sets.
+    return "fr" if tenant.default_locale.value == "fr" else "en"
+
+
+async def load_config(session: AsyncSession) -> tuple[list[DialplanTenant], list[PjsipTrunk]]:
+    """Everything the generated files need, with the same activity rules as the realtime views:
+    active tenants, enabled extensions of active users, enabled trunks and routes."""
+    tenants = (
+        await session.scalars(
+            select(Tenant).where(Tenant.status == TenantStatus.ACTIVE).order_by(Tenant.slug)
+        )
+    ).all()
+    by_tenant = {
+        t.id: DialplanTenant(
+            slug=t.slug, context=tenant_context(t.id), inbound_context=inbound_context(t.id)
+        )
+        for t in tenants
+    }
+
+    for tenant_id, number, endpoint in (
+        await session.execute(
+            select(Extension.tenant_id, Extension.number, Extension.sip_username)
+            .outerjoin(User, User.id == Extension.user_id)
+            .where(Extension.enabled, (User.id.is_(None)) | User.is_active)
+            .order_by(Extension.number)
+        )
+    ).all():
+        if tenant_id in by_tenant:
+            by_tenant[tenant_id].extensions.append(DialplanExtension(number, endpoint))
+
+    trunks = [
+        k
+        for k in (
+            await session.scalars(select(Trunk).where(Trunk.enabled).order_by(Trunk.name))
+        ).all()
+        if k.tenant_id in by_tenant
+    ]
+    trunk_by_id = {k.id: k for k in trunks}
+    trunk_ctx: dict[uuid.UUID, DialplanTrunk] = {}
+    for k in trunks:
+        trunk_ctx[k.id] = DialplanTrunk(k.asterisk_id, inbound_context(k.tenant_id, k.id))
+        by_tenant[k.tenant_id].trunks.append(trunk_ctx[k.id])
+
+    route_trunks = (
+        await session.scalars(select(OutboundRouteTrunk).order_by(OutboundRouteTrunk.position))
+    ).all()
+    for r in (
+        await session.scalars(
+            select(OutboundRoute)
+            .where(OutboundRoute.enabled)
+            .order_by(OutboundRoute.priority, OutboundRoute.name)
+        )
+    ).all():
+        if r.tenant_id not in by_tenant:
+            continue
+        steps = [
+            RouteStep(
+                trunk=trunk_by_id[rt.trunk_id].asterisk_id,
+                caller_id=r.caller_id_number or trunk_by_id[rt.trunk_id].caller_id_number or "",
+            )
+            for rt in route_trunks
+            if rt.route_id == r.id and rt.trunk_id in trunk_by_id
+        ]
+        if steps:  # a route whose trunks are all disabled sends nothing
+            by_tenant[r.tenant_id].routes.append(
+                DialplanRoute(r.pattern, r.strip_digits, r.prepend, steps)
+            )
+
+    # flows that answer calls: only those with a published version
+    published: set[uuid.UUID] = set()
+    for f in (
+        await session.scalars(
+            select(IvrFlow).where(IvrFlow.published_version.is_not(None)).order_by(IvrFlow.number)
+        )
+    ).all():
+        published.add(f.id)
+        if f.number and f.tenant_id in by_tenant:
+            by_tenant[f.tenant_id].flows.append(DialplanFlow(f.number, f.id.hex))
+
+    for i in (
+        await session.scalars(
+            select(InboundRoute).where(InboundRoute.enabled).order_by(InboundRoute.did)
+        )
+    ).all():
+        if i.destination_flow_id is not None:
+            if i.destination_flow_id not in published:
+                continue  # never published: the number stays unknown until it is
+            item = DialplanInbound(i.did, "", i.destination_flow_id.hex)
+        else:
+            item = DialplanInbound(i.did, i.destination_number or "")
+        if i.trunk_id is None:
+            if i.tenant_id in by_tenant:
+                by_tenant[i.tenant_id].inbound.append(item)
+        elif i.trunk_id in trunk_ctx:
+            trunk_ctx[i.trunk_id].inbound.append(item)
+
+    lang = {t.id: _language(t) for t in tenants}
+    pjsip = [
+        PjsipTrunk(
+            endpoint=k.asterisk_id,
+            kind=k.kind,
+            tenant_id=k.tenant_id,
+            context=inbound_context(k.tenant_id, k.id),
+            language=lang[k.tenant_id],
+            host=k.host,
+            port=k.port,
+            transport=k.transport.value,
+            auth_username=k.auth_username,
+            secret=crypto.decrypt(k.auth_secret_enc) if k.auth_secret_enc else None,
+            from_domain=k.from_domain,
+            sip_ha1=k.sip_ha1,
+            inbound_ips=list(k.inbound_ips or []),
+        )
+        for k in trunks
+    ]
+    return [by_tenant[t.id] for t in tenants], pjsip
+
+
+# ----------------------------------------------------------------------------- writing
+
+
+def write_atomically(
+    directory: Path, name: str, content: str, mode: int = 0o644, gid: int | None = None
+) -> bool:
+    """Write the file only if it changed (ignoring the generated-at stamp); atomic rename so
+    readers never see half a file. Returns True when the content changed."""
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / name
+    if target.exists() and _strip_stamp(target.read_text()) == _strip_stamp(content):
+        return False
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=f".{name}.")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(content)
+        if gid is not None:
+            os.chown(tmp, -1, gid)
+        os.chmod(tmp, mode)
+        os.replace(tmp, target)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+    return True
+
+
+def _strip_stamp(content: str) -> str:
+    return re.sub(r"^[;#] GENERATED by Mira Core from the database \([^)]*\)", "", content, count=1)
+
+
+# ----------------------------------------------------------------------------- reloading
+
+
+class AsteriskAri:
+    """The few ARI calls config generation needs. Asterisk is on the same host (loopback)."""
+
+    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+        self._client_args = {
+            "base_url": settings.ari_url,
+            "auth": (settings.ari_user, settings.ari_password.get_secret_value()),
+            "timeout": 10.0,
+            "transport": transport,
+        }
+
+    async def reload_module(self, module: str) -> None:
+        async with httpx.AsyncClient(**self._client_args) as client:  # type: ignore[arg-type]
+            r = await client.put(f"/asterisk/modules/{module}")
+            r.raise_for_status()
+
+    # ---- call control (task 1.3) ----
+
+    async def channels(self) -> list[dict[str, Any]]:
+        async with httpx.AsyncClient(**self._client_args) as client:  # type: ignore[arg-type]
+            r = await client.get("/channels")
+            r.raise_for_status()
+            result: list[dict[str, Any]] = r.json()
+            return result
+
+    async def hangup(self, channel_id: str) -> bool:
+        """Hang up one channel. False when it is already gone."""
+        async with httpx.AsyncClient(**self._client_args) as client:  # type: ignore[arg-type]
+            r = await client.delete(f"/channels/{channel_id}", params={"reason": "normal"})
+            if r.status_code == 404:
+                return False
+            r.raise_for_status()
+            return True
+
+    async def originate(
+        self, endpoint: str, context: str, extension: str, caller_id: str, timeout: int = 30
+    ) -> dict[str, Any]:
+        """Ring `endpoint` first; when it answers, run `extension` in `context` (click-to-call)."""
+        async with httpx.AsyncClient(**self._client_args) as client:  # type: ignore[arg-type]
+            r = await client.post(
+                "/channels",
+                params={
+                    "endpoint": endpoint,
+                    "context": context,
+                    "extension": extension,
+                    "priority": 1,
+                    "callerId": caller_id,
+                    "timeout": timeout,
+                },
+            )
+            r.raise_for_status()
+            channel: dict[str, Any] = r.json()
+            return channel
+
+
+class KamailioRpc:
+    """Kamailio JSON-RPC on loopback, protected by a shared token (X-Mira-Token)."""
+
+    # Kamailio refuses a dispatcher reload that comes too soon after the previous one
+    # (reload_delta, 1 s in kamailio.cfg): an admin adding two trunks quickly hits that, so a
+    # refused call is retried a few times before it counts as failed.
+    ATTEMPTS = 5
+
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.AsyncBaseTransport | None = None,
+        retry_delay: float = 1.2,
+    ):
+        self._url = settings.kamailio_rpc_url
+        self._headers = {"X-Mira-Token": settings.kamailio_rpc_token.get_secret_value()}
+        self._transport = transport
+        self._retry_delay = retry_delay
+
+    async def call(self, method: str) -> object:
+        async with httpx.AsyncClient(timeout=10.0, transport=self._transport) as client:
+            for attempt in range(1, self.ATTEMPTS + 1):
+                r = await client.post(
+                    self._url,
+                    headers=self._headers,
+                    json={"jsonrpc": "2.0", "method": method, "id": attempt},
+                )
+                # A refused reload comes back as HTTP 500 "Ongoing reload" (seen on 6.1.6),
+                # other faults as a JSON-RPC error: both are retried, a 4xx (bad token) is not.
+                if r.status_code < 500:
+                    r.raise_for_status()
+                    body = r.json()
+                    if "error" not in body:
+                        return body.get("result")
+                    fault = str(body["error"])
+                else:
+                    fault = f"HTTP {r.status_code} {r.reason_phrase}"
+                if attempt == self.ATTEMPTS:
+                    raise httpx.HTTPError(f"{method}: {fault}")
+                await asyncio.sleep(self._retry_delay)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+@dataclass
+class ApplyResult:
+    changed: list[str] = field(default_factory=list)
+    reloaded: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+
+
+async def apply_config(
+    session: AsyncSession,
+    settings: Settings,
+    ari: AsteriskAri | None = None,
+    kamailio: KamailioRpc | None = None,
+) -> ApplyResult:
+    """Regenerate every telephony file from the database and reload what changed.
+
+    Runs under a transaction-scoped advisory lock so two concurrent changes cannot write an
+    older view of the data last. A reload failure is reported, not raised: the files are
+    already correct and are read again at the next start or change."""
+    result = ApplyResult()
+    async with session.begin_nested() if session.in_transaction() else session.begin():
+        await session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _ADVISORY_LOCK})
+        tenants, trunks = await load_config(session)
+        asterisk_dir = Path(settings.asterisk_generated_dir)
+        gid = settings.asterisk_config_gid
+        files = [
+            (asterisk_dir, DIALPLAN_FILE, render_dialplan(tenants), 0o640, gid),
+            (asterisk_dir, PJSIP_FILE, render_pjsip(trunks), 0o640, gid),
+            (
+                Path(settings.kamailio_generated_dir),
+                DISPATCHER_FILE,
+                render_dispatcher(trunks),
+                0o644,
+                None,
+            ),
+        ]
+        for directory, name, content, mode, file_gid in files:
+            if write_atomically(directory, name, content, mode, file_gid):
+                result.changed.append(name)
+
+    ari = ari or AsteriskAri(settings)
+    kamailio = kamailio or KamailioRpc(settings)
+    reloads: list[tuple[str, Callable[[], Awaitable[object]]]] = []
+    if PJSIP_FILE in result.changed:
+        reloads.append(("res_pjsip.so", lambda: ari.reload_module("res_pjsip.so")))
+        reloads.append(
+            (
+                "res_pjsip_outbound_registration.so",
+                lambda: ari.reload_module("res_pjsip_outbound_registration.so"),
+            )
+        )
+    if DIALPLAN_FILE in result.changed:
+        reloads.append(("pbx_config.so", lambda: ari.reload_module("pbx_config.so")))
+    if DISPATCHER_FILE in result.changed:
+        reloads.append(("dispatcher.reload", lambda: kamailio.call("dispatcher.reload")))
+    for name, reload in reloads:
+        try:
+            await reload()
+            result.reloaded.append(name)
+        except httpx.HTTPError as exc:
+            log.warning("reload of %s failed (files are written): %s", name, exc)
+            result.errors.append(f"{name}: {exc}")
+    return result

@@ -1,0 +1,106 @@
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@800;900&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap');
+
+/* Mira Voice components — every value is a token. Logical properties so RTL (Arabic) mirrors for free. */
+body { margin: 0; font-family: var(--font-sans); background: var(--surface); color: var(--ink); font-size: 14px; line-height: 20px; }
+.mv-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; padding: var(--space-4); }
+.mv-stack { display: grid; gap: var(--space-4); padding: var(--space-4); }
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
+
+/* Button */
+.mv-btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); height: var(--control-md); padding: 0 var(--space-4); border-radius: var(--radius-md); border: 1px solid transparent; font: 600 14px/20px var(--font-sans); cursor: pointer; transition: background-color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard); }
+.mv-btn--sm { height: var(--control-sm); padding: 0 var(--space-3); font-size: 13px; }
+.mv-btn--lg { height: var(--control-lg); padding: 0 var(--space-6); font-size: 16px; }
+.mv-btn--primary { background: var(--button-primary-bg); color: var(--button-primary-fg); }
+.mv-btn--primary:hover { background: var(--button-primary-bg-hover); }
+.mv-btn--secondary { background: var(--button-secondary-bg); color: var(--button-secondary-fg); border-color: var(--button-secondary-border); }
+.mv-btn--secondary:hover { background: var(--surface-sunken); }
+.mv-btn--ghost { background: transparent; color: var(--ink); }
+.mv-btn--ghost:hover { background: var(--surface-sunken); }
+.mv-btn--danger { background: var(--button-danger-bg); color: var(--button-danger-fg); border-color: var(--button-danger-fg); }
+.mv-btn:active { transform: translateY(1px); }
+.mv-btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+
+/* StatusPill */
+.mv-pill { display: inline-flex; align-items: center; gap: var(--space-2); height: 28px; padding: 0 var(--space-3); border-radius: var(--radius-pill); font: 500 13px/18px var(--font-sans); white-space: nowrap; }
+.mv-pill__dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+.mv-pill__timer { font-family: var(--font-mono); font-size: 12px; opacity: .9; padding-inline-start: var(--space-1); border-inline-start: 1px solid currentColor; }
+.mv-pill--live { background: var(--state-live-soft); color: var(--state-live); }
+.mv-pill--ringing { background: var(--state-ringing-soft); color: var(--state-ringing); }
+.mv-pill--ringing .mv-pill__dot { box-shadow: 0 0 0 3px var(--state-ringing-soft), 0 0 0 4px currentColor; }
+.mv-pill--active { background: var(--mira-red); color: var(--on-red); }
+.mv-pill--hold { background: var(--state-hold-soft); color: var(--state-hold); }
+.mv-pill--offline { background: var(--state-offline-soft); color: var(--state-offline); }
+.mv-pill--offline .mv-pill__dot { background: transparent; border: 1.5px solid currentColor; }
+
+/* CallPanel */
+.mv-call { width: var(--call-panel); max-width: 100%; background: var(--callpanel-bg); border-radius: var(--radius-lg); box-shadow: var(--shadow-raised); overflow: hidden; border: 1px solid var(--line); }
+.mv-call__bar { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); font: 600 13px/18px var(--font-sans); }
+.mv-call--connected .mv-call__bar { background: var(--callpanel-bar-active); color: var(--on-red); }
+.mv-call--ringing .mv-call__bar { background: var(--callpanel-bar-ringing); color: var(--state-ringing); }
+.mv-call--hold .mv-call__bar { background: var(--callpanel-bar-hold); color: var(--state-hold); }
+.mv-call__queue { font-weight: 500; opacity: .9; }
+.mv-call__timer { margin-inline-start: auto; font: 500 15px/20px var(--font-mono); }
+.mv-call__who { padding: var(--space-4) var(--space-4) var(--space-2); }
+.mv-call__name { font: 600 20px/28px var(--font-sans); }
+.mv-call__number { font: 500 14px/20px var(--font-mono); color: var(--ink-muted); text-align: start; }
+.mv-call__card { margin: 0 var(--space-4); padding: var(--space-3); border-radius: var(--radius-md); background: var(--surface-sunken); display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2) var(--space-4); }
+.mv-call__field dt { font: 500 12px/16px var(--font-sans); color: var(--ink-muted); }
+.mv-call__field dd { margin: 0; font: 600 14px/20px var(--font-sans); }
+.mv-call__controls { padding: var(--space-4); display: grid; gap: var(--space-4); justify-items: center; }
+.mv-call__grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2); width: 100%; }
+.mv-ctrl { display: grid; justify-items: center; gap: var(--space-1); padding: var(--space-2) 0; min-height: var(--touch-min); border: 0; border-radius: var(--radius-md); background: var(--call-control-bg); color: var(--call-control-fg); font: 500 12px/16px var(--font-sans); cursor: pointer; transition: background-color var(--duration-fast) var(--ease-standard); }
+.mv-ctrl.is-on { background: var(--call-control-on-bg); color: var(--call-control-on-fg); }
+.mv-call__answer { display: flex; justify-content: center; gap: var(--space-12); padding: var(--space-6) var(--space-4); }
+.mv-round { width: var(--call-button); height: var(--call-button); border-radius: var(--radius-pill); border: 0; display: grid; place-items: center; color: var(--on-red); cursor: pointer; transition: transform var(--duration-fast) var(--ease-standard); }
+.mv-round:active { transform: scale(.96); }
+.mv-round:disabled { opacity: .4; cursor: not-allowed; }
+.mv-round--answer { background: var(--call-answer-bg); }
+.mv-round--hangup, .mv-round--decline { background: var(--call-hangup-bg); }
+
+/* DialPad */
+.mv-dial { width: 280px; display: grid; gap: var(--space-4); justify-items: center; padding: var(--space-4); }
+.mv-dial__display { width: 100%; min-height: 44px; display: flex; align-items: center; justify-content: center; gap: var(--space-2); }
+.mv-dial__value { font: 500 28px/32px var(--font-mono); letter-spacing: .02em; }
+.mv-dial__hint { font: 400 15px/20px var(--font-sans); color: var(--ink-subtle); letter-spacing: 0; }
+.mv-dial__del { border: 0; background: transparent; color: var(--ink-muted); width: 44px; height: 44px; border-radius: var(--radius-pill); cursor: pointer; display: grid; place-items: center; }
+.mv-dial__keys { display: grid; grid-template-columns: repeat(3, var(--dial-key)); gap: var(--space-3) var(--space-6); }
+.mv-dial__key { width: var(--dial-key); height: var(--dial-key); border-radius: var(--radius-pill); border: 0; background: var(--dialkey-bg); color: var(--dialkey-fg); display: grid; align-content: center; justify-items: center; cursor: pointer; transition: background-color var(--duration-fast) var(--ease-standard); }
+.mv-dial__key:active { background: var(--line); }
+.mv-dial__digit { font: 500 28px/30px var(--font-sans); }
+.mv-dial__letters { font: 600 10.5px/12px var(--font-sans); letter-spacing: .12em; color: var(--dialkey-letters); }
+
+/* KpiTile */
+.mv-kpi { background: var(--kpi-bg); border-radius: var(--radius-lg); padding: var(--space-4); border: 1px solid var(--line); display: grid; gap: var(--space-2); min-width: 200px; }
+.mv-kpi__label { font: 500 13px/18px var(--font-sans); color: var(--kpi-label); }
+.mv-kpi__value { font: 500 40px/44px var(--font-mono); color: var(--kpi-value); }
+.mv-kpi__unit { font: 500 16px/20px var(--font-sans); color: var(--ink-muted); margin-inline-start: var(--space-1); }
+.mv-kpi__foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); font: 500 12px/16px var(--font-sans); color: var(--ink-muted); }
+.mv-kpi__status { display: inline-flex; align-items: center; gap: var(--space-1); font-weight: 600; }
+.mv-kpi__dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.mv-kpi--ok .mv-kpi__status { color: var(--state-live); }
+.mv-kpi--warn .mv-kpi__status { color: var(--state-ringing); }
+.mv-kpi--warn { background: var(--state-ringing-soft); border-color: transparent; }
+.mv-kpi--bad .mv-kpi__status { color: var(--danger); }
+.mv-kpi--bad { background: var(--danger-soft); border-color: transparent; }
+.mv-kpi__trend { display: inline-flex; align-items: center; gap: var(--space-1); }
+.mv-kpi--wallboard { background: var(--neutral-850); color: var(--neutral-50); border-color: var(--neutral-700); padding: var(--space-8); min-width: 320px; }
+.mv-kpi--wallboard .mv-kpi__label { font-size: 20px; line-height: 28px; color: var(--neutral-300); }
+.mv-kpi--wallboard .mv-kpi__value { font: 800 96px/96px var(--font-display); color: var(--neutral-50); }
+.mv-kpi--wallboard .mv-kpi__foot { font-size: 16px; line-height: 24px; color: var(--neutral-300); }
+.mv-kpi--wallboard.mv-kpi--ok .mv-kpi__status { color: var(--green-300); }
+.mv-kpi--wallboard.mv-kpi--warn { background: var(--neutral-850); border-color: var(--amber-300); }
+.mv-kpi--wallboard.mv-kpi--warn .mv-kpi__status { color: var(--amber-300); }
+.mv-kpi--wallboard.mv-kpi--bad { background: var(--neutral-850); border-color: var(--clay-300); }
+.mv-kpi--wallboard.mv-kpi--bad .mv-kpi__status { color: var(--clay-300); }
+
+/* TextField */
+.mv-field { display: grid; gap: var(--space-2); max-width: 320px; }
+.mv-field__label { font: 500 13px/18px var(--font-sans); color: var(--ink); }
+.mv-field__input { height: var(--control-md); padding: 0 var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--input-border); background: var(--input-bg); color: var(--input-fg); font: 400 14px/20px var(--font-sans); transition: border-color var(--duration-fast) var(--ease-standard); }
+.mv-field__input.is-mono { font-family: var(--font-mono); }
+.mv-field__input::placeholder { color: var(--input-placeholder); }
+.mv-field__input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; border-color: var(--input-border-focus); }
+.mv-field__hint { font: 500 12px/16px var(--font-sans); color: var(--ink-muted); }
+.mv-field__error { display: flex; gap: var(--space-1); align-items: center; font: 500 12px/16px var(--font-sans); color: var(--danger); }
+.mv-field.is-error .mv-field__input { border-color: var(--danger); border-width: 2px; }

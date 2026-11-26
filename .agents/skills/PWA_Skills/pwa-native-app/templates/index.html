@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <!-- viewport-fit=cover: draw under notch/home indicator (pad with env(safe-area-inset-*)).
+       interactive-widget: keyboard shrinks layout viewport on Chromium/Firefox (iOS ignores it; see platform.ts). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <title>Fieldnote</title>
+  <meta name="description" content="Capture site visits, photos and tasks — online or off." />
+
+  <!-- Theme colour per scheme: tints Android status bar, desktop title bar, iOS 15+ Safari chrome -->
+  <meta name="theme-color" content="#f4f1ea" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0f1720" media="(prefers-color-scheme: dark)" />
+  <meta name="color-scheme" content="light dark" />
+
+  <!-- iOS home-screen polish (manifest still wins for icons/display on iOS 16.4+) -->
+  <meta name="apple-mobile-web-app-title" content="Fieldnote" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="format-detection" content="telephone=no" />
+
+  <link rel="icon" href="/favicon.ico" sizes="48x48" />
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+
+  <!-- Paint the right background before CSS arrives = no white flash on launch -->
+  <style>html{background:#f4f1ea}@media (prefers-color-scheme:dark){html{background:#0f1720}}</style>
+  <link rel="stylesheet" href="/src/styles/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="appbar" data-wco-drag>
+    <button class="icon-btn back-btn pressable" type="button" aria-label="Back" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 class="appbar-title">Today</h1>
+    <span class="net-pill" role="status" aria-live="polite" hidden>Offline</span>
+    <button class="icon-btn pressable" type="button" aria-label="Install app" data-install hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></svg>
+    </button>
+  </header>
+
+  <main id="main" class="content" tabindex="-1">
+    <section class="hero">
+      <p class="eyebrow">Sunday · 3 visits</p>
+      <h2 class="display">Good morning, Khaled</h2>
+      <p class="muted">2 notes waiting to sync.</p>
+    </section>
+
+    <ul class="list" role="list">
+      <li><a class="row pressable" href="#visit-1"><span class="row-dot"></span><span class="row-body"><strong>Kayan warehouse</strong><small>09:30 · Fan install survey</small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></a></li>
+      <li><a class="row pressable" href="#visit-2"><span class="row-dot is-warn"></span><span class="row-body"><strong>Cheops site office</strong><small>12:00 · Contract review</small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></a></li>
+      <li><a class="row pressable" href="#visit-3"><span class="row-dot is-ok"></span><span class="row-body"><strong>Benya HQ</strong><small>15:30 · Odoo walkthrough</small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></a></li>
+    </ul>
+
+    <div class="card skeleton-demo" aria-hidden="true">
+      <div class="skeleton" style="width:40%"></div>
+      <div class="skeleton"></div>
+      <div class="skeleton" style="width:70%"></div>
+    </div>
+  </main>
+
+  <button class="fab pressable" type="button" aria-haspopup="dialog" data-open-sheet="new-note">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    <span>New note</span>
+  </button>
+
+  <nav class="tabbar" aria-label="Primary">
+    <a class="tab pressable" href="/" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-7 8 7v9H4z"/></svg><span>Today</span></a>
+    <a class="tab pressable" href="#visits"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0114 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span>Visits</span></a>
+    <a class="tab pressable" href="#notes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6z"/><path d="M9 10h6M9 14h6"/></svg><span>Notes</span></a>
+    <a class="tab pressable" href="#me"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><span>Me</span></a>
+  </nav>
+
+  <dialog class="sheet" id="new-note" aria-labelledby="new-note-title" closedby="any">
+    <div class="sheet-grabber" data-sheet-drag aria-hidden="true"></div>
+    <h2 id="new-note-title" class="sheet-title">New note</h2>
+    <form method="dialog" class="stack">
+      <label class="field"><span>Title</span><input name="title" autocomplete="off" enterkeyhint="next" required /></label>
+      <label class="field"><span>Note</span><textarea name="body" rows="4" enterkeyhint="done"></textarea></label>
+      <div class="sheet-actions">
+        <button class="btn btn-ghost pressable" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn btn-primary pressable" value="save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" role="status" aria-live="polite" hidden>
+    <span class="toast-text"></span>
+    <button class="toast-action" type="button" hidden></button>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

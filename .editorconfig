@@ -1,0 +1,41 @@
+# Mira Voice — editor settings shared by every editor (editorconfig.org)
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.py]
+indent_size = 4
+
+# Frappe apps use tabs (Frappe's own ruff config: indent-style = "tab")
+[connect/**.py]
+indent_style = tab
+indent_size = 4
+
+# Asterisk, Kamailio, RTPengine and coturn configs
+[telephony/**.{conf,cfg}]
+indent_style = tab
+indent_size = 8
+
+# shell scripts use tabs so `<<-EOF` heredocs can be indented (shfmt default)
+[*.sh]
+indent_style = tab
+
+[Makefile]
+indent_style = tab
+
+[*.md]
+# two trailing spaces are a Markdown line break
+trim_trailing_whitespace = false
+
+[*.{pdf,png,jpg,jpeg,gif,ico,wav,mp3,gsm,ulaw,alaw,sln16}]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+indent_style = unset
