@@ -171,7 +171,7 @@ services:
   # ---------------- telephony ----------------
   rtpengine:
     <<: *hardening
-    image: mira/rtpengine:26.0.1.29
+    image: mira/rtpengine:26.0
     pull_policy: never
     environment:
       MIRA_LOCAL_IP: ${MIRA_LOCAL_IP:?run install.sh}

@@ -5,7 +5,9 @@
 
 FROM debian:trixie-slim
 ARG RTPENGINE_SERIES=26.0
-ARG RTPENGINE_VERSION=26.0.1.29-1~bpo13+1
+# Tested version. rtpengine.dfx.at keeps only the newest release of a series: if this one
+# has been replaced, the build takes the newest 26.0.x and says so (same LTS series).
+ARG RTPENGINE_VERSION=26.0.1.30-1~bpo13+1
 # Keyring package and its SHA256 as published on https://dfx.at/rtpengine/
 ARG DFX_KEYRING_URL=https://rtpengine.dfx.at/latest/pool/main/r/rtpengine-dfx-repo-keyring/rtpengine-dfx-repo-keyring_1.0_all.deb
 ARG DFX_KEYRING_SHA256=78fe26f0251138f4e3c749c88dc4df29666c8efe0823858d3a4ab49d2fa2e088
@@ -22,7 +24,12 @@ RUN set -e; \
 	echo "deb [signed-by=/usr/share/keyrings/dfx.at-rtpengine-archive-keyring.gpg] https://rtpengine.dfx.at/${RTPENGINE_SERIES} trixie main" \
 		>/etc/apt/sources.list.d/rtpengine.list; \
 	apt-get update; \
-	apt-get install -y --no-install-recommends rtpengine-daemon="${RTPENGINE_VERSION}" rtpengine-utils gettext-base; \
+	pin="=${RTPENGINE_VERSION}"; \
+	if ! apt-cache show "rtpengine-daemon=${RTPENGINE_VERSION}" >/dev/null 2>&1; then \
+		echo "NOTE: rtpengine ${RTPENGINE_VERSION} is no longer published; installing the newest ${RTPENGINE_SERIES} release"; \
+		pin=""; \
+	fi; \
+	apt-get install -y --no-install-recommends "rtpengine-daemon${pin}" rtpengine-utils gettext-base; \
 	rm -rf /var/lib/apt/lists/*; \
 	rtpengine --version
 

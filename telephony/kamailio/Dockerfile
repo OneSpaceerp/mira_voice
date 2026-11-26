@@ -4,6 +4,8 @@
 
 FROM debian:trixie-slim
 ARG KAMAILIO_SERIES=61
+# Tested version. deb.kamailio.org keeps only the newest release of a series: if this one
+# has been replaced, the build takes the newest 6.1.x and says so (same series).
 ARG KAMAILIO_VERSION=6.1.6+bpo13
 # Kamailio Package Team signing key (deb.kamailio.org)
 ARG KAMAILIO_KEY_FPR=E79ACECB87D8DCD23A20AD2FFB40D3E6508EA4C8
@@ -20,11 +22,16 @@ RUN set -e; \
 	echo "deb [signed-by=/usr/share/keyrings/kamailio.gpg] https://deb.kamailio.org/kamailio${KAMAILIO_SERIES} trixie main" \
 		>/etc/apt/sources.list.d/kamailio.list; \
 	apt-get update; \
+	pin="=${KAMAILIO_VERSION}"; \
+	if ! apt-cache show "kamailio=${KAMAILIO_VERSION}" >/dev/null 2>&1; then \
+		echo "NOTE: kamailio ${KAMAILIO_VERSION} is no longer published; installing the newest ${KAMAILIO_SERIES} release"; \
+		pin=""; \
+	fi; \
 	apt-get install -y --no-install-recommends \
-		kamailio="${KAMAILIO_VERSION}" \
-		kamailio-tls-modules="${KAMAILIO_VERSION}" \
-		kamailio-websocket-modules="${KAMAILIO_VERSION}" \
-		kamailio-extra-modules="${KAMAILIO_VERSION}" \
+		"kamailio${pin}" \
+		"kamailio-tls-modules${pin}" \
+		"kamailio-websocket-modules${pin}" \
+		"kamailio-extra-modules${pin}" \
 		gettext-base; \
 	apt-get purge -y gpg; apt-get autoremove -y; \
 	rm -rf /var/lib/apt/lists/*; \
