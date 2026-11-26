@@ -23,7 +23,7 @@ RUN set -e; \
 		>/etc/apt/sources.list.d/kamailio.list; \
 	apt-get update; \
 	pin="=${KAMAILIO_VERSION}"; \
-	if ! apt-cache show "kamailio=${KAMAILIO_VERSION}" >/dev/null 2>&1; then \
+	if ! apt-cache madison kamailio | awk '{print $3}' | grep -qxF "${KAMAILIO_VERSION}"; then \
 		echo "NOTE: kamailio ${KAMAILIO_VERSION} is no longer published; installing the newest ${KAMAILIO_SERIES} release"; \
 		pin=""; \
 	fi; \

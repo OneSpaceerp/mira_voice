@@ -25,7 +25,7 @@ RUN set -e; \
 		>/etc/apt/sources.list.d/rtpengine.list; \
 	apt-get update; \
 	pin="=${RTPENGINE_VERSION}"; \
-	if ! apt-cache show "rtpengine-daemon=${RTPENGINE_VERSION}" >/dev/null 2>&1; then \
+	if ! apt-cache madison rtpengine-daemon | awk '{print $3}' | grep -qxF "${RTPENGINE_VERSION}"; then \
 		echo "NOTE: rtpengine ${RTPENGINE_VERSION} is no longer published; installing the newest ${RTPENGINE_SERIES} release"; \
 		pin=""; \
 	fi; \
