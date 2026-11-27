@@ -154,8 +154,9 @@ run_phone p1 60 "/dial sip:4002@$DOMAIN"
 sleep 5
 docker restart mira-core-events-1 >/dev/null
 for _ in $(seq 1 40); do [ "$(docker inspect -f '{{.State.Health.Status}}' mira-core-events-1)" = healthy ] && break; sleep 2; done
-CID=$(get "calls/live?tenant_id=$T" | json "d[0]['call_id'] if d else ''")
-if [ -n "$CID" ]; then ok "after the restart the call is still live (picked up again)"; else bad "call lost by the restart"; fi
+live=$(get "calls/live?tenant_id=$T")
+CID=$(echo "$live" | json "d[0]['call_id'] if isinstance(d, list) and d else ''" 2>/dev/null)
+if [ -n "$CID" ]; then ok "after the restart the call is still live (picked up again)"; else bad "call lost by the restart: $live"; fi
 docker stop mira-core-events-1 >/dev/null
 stop_phone p1
 stop_phone p2
