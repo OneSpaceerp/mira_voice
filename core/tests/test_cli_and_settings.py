@@ -71,7 +71,9 @@ async def test_bootstrap_first_install_then_nothing(
     me = (await client.get("/api/v1/auth/me", headers=headers)).json()
     assert (me["role"], me["locale"]) == ("platform_admin", "en")
     tenants = (await client.get("/api/v1/tenants", headers=headers)).json()
-    assert [(t["name"], t["slug"], t["default_locale"]) for t in tenants] == [("Acme", "main", "en")]
+    assert [(t["name"], t["slug"], t["default_locale"]) for t in tenants] == [
+        ("Acme", "main", "en")
+    ]
 
     # the installer runs it on every install: never a second admin, never a new password
     code = await anyio.to_thread.run_sync(main, ["bootstrap", "--email", "other@example.com"])

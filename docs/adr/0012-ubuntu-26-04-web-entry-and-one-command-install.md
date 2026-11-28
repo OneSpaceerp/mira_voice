@@ -66,3 +66,16 @@ curl -fsSL https://raw.githubusercontent.com/OneSpaceerp/mira_voice/main/deploy/
   - The download trusts GitHub's TLS and the repository. There is no signature yet; signed release archives come with tagged releases.
 - **The Desk is still a plain single-page app.** Its PWA parts (manifest, service worker) come in their own task.
 - **Shared servers aren't supported.** An install on a machine that already runs another web or database server stops early with a clear message, instead of half-working.
+
+## Gate results (2026-11-28)
+| | Ubuntu 24.04 | Ubuntu 26.04.1 |
+| --- | --- | --- |
+| Install checks (incl. web, ports, first sign-in, wrong-OS refusal) | 70/70 | 70/70 |
+| Uninstall, purge, fresh install | 20/20 | 20/20 |
+| Real calls (SIP, extensions, call events, IVR, trunks, WebRTC) | 25/25 | all green except 3 outbound-carrier checks: the 26.04 test carrier (`baresip-core` 1.1.0) answers 404 to unregistered accounts; Mira's INVITE verified with a SIP trace |
+| Mira Desk in a browser, against the installed HTTPS site | 6/6 | 6/6 |
+
+Found and fixed by this gate:
+- **RTPengine 26.0.1.29 was withdrawn upstream.** rtpengine.dfx.at and deb.kamailio.org keep only the newest release of a series. The Dockerfiles pin the tested version and fall back to the newest of the same series, with a NOTE in the build log.
+- **The admin-email question waited forever** when a terminal existed but nobody watched. It is now asked only when the output is on a screen, with a 5-minute limit.
+- **The installer's port check failed on a free port** under `set -e` / `pipefail`.
