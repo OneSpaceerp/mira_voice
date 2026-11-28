@@ -220,9 +220,10 @@ if grep -q "Call established" "$WORK/desk/log.txt" && echo " $heard " | grep -qE
 	ok "key 1 transferred the call to 5002 (caller heard the desk)"
 else bad "transfer to 5002: desk log $(grep -c 'Call established' "$WORK/desk/log.txt"), heard '$heard'"; fi
 sleep 2
-CID=$(latest_call | json "d[0]['id']")
-path=$(get "calls/$CID" | json "' '.join(e['data'].get('node', '') for e in d['events'] if e['type'] == 'FlowNode')")
-if [ "$path" = "welcome menu desk" ]; then ok "IVR path in call_events: $path"; else bad "IVR path: '$path'"; fi
+lc=$(latest_call)
+CID=$(echo "$lc" | json "d[0]['id'] if isinstance(d, list) and d else ''" 2>/dev/null)
+path=$(get "calls/$CID" | json "' '.join(e['data'].get('node', '') for e in d['events'] if e['type'] == 'FlowNode')" 2>/dev/null)
+if [ "$path" = "welcome menu desk" ]; then ok "IVR path in call_events: $path"; else bad "IVR path: '$path' (latest call: ${lc:0:300})"; fi
 
 echo "### 3. 7000, key 2: switch to French, the French welcome plays"
 call_flow 7000 14 6 2
@@ -252,9 +253,10 @@ curl -s -H "Authorization: Bearer $A" -o "$WORK/vm.wav" "$API/voicemails/$VM/aud
 vm_tones=$(tones_in "$WORK/vm.wav" 2>/dev/null)
 if echo " $vm_tones " | grep -q " 450 \| 400 \| 440 "; then ok "the message is the caller's 440 Hz tone: $vm_tones"; else bad "voicemail audio: '$vm_tones'"; fi
 if [ "$(curl -s -H "Authorization: Bearer $A" "$API/voicemails" | json "d[0]['heard']")" = True ]; then ok "listening marked it heard"; else bad "not marked heard"; fi
-CID=$(latest_call | json "d[0]['id']")
+lc=$(latest_call)
+CID=$(echo "$lc" | json "d[0]['id'] if isinstance(d, list) and d else ''" 2>/dev/null)
 events=$(get "calls/$CID" | json "json.dumps(d['events'])" 2>/dev/null || get "calls/$CID")
-if echo "$events" | grep -q '"FlowEnded"' && ! echo "$events" | grep -q "1111"; then ok "flow ended in voicemail; the typed account is not in call_events"; else bad "events: ${events:0:400}"; fi
+if echo "$events" | grep -q '"FlowEnded"' && ! echo "$events" | grep -q "1111"; then ok "flow ended in voicemail; the typed account is not in call_events"; else bad "events: ${events:0:400} (latest call: ${lc:0:300})"; fi
 
 echo "### 6. 7001 on a holiday: closed prompt"
 call_flow 7001 10

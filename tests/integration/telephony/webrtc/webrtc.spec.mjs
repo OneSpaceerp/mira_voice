@@ -28,6 +28,21 @@ async function phone(browser, ext, password, toneHz) {
   return page
 }
 
+// Wait until RTP flows both ways (call setup with ICE + DTLS can take a few seconds,
+// e.g. the first call after RTPengine starts), then let 3 s of audio arrive to analyse.
+// The setup time is logged so a slow setup stays visible.
+async function waitForMedia(page, who, timeoutMs = 15000) {
+  const start = Date.now()
+  for (;;) {
+    const s = await page.evaluate(() => window.mira.stats())
+    if ((s.outbound?.packetsSent ?? 0) > 0 && (s.inbound?.packetsReceived ?? 0) > 0) break
+    if (Date.now() - start > timeoutMs) break
+    await page.waitForTimeout(250)
+  }
+  console.log(`${who}: media flowing after ${Date.now() - start} ms`)
+  await page.waitForTimeout(3000)
+}
+
 async function expectAudio(page, who, expectedHz) {
   const s = await page.evaluate(() => window.mira.stats())
   const tone = await page.evaluate(() => window.mira.remoteTone())
@@ -46,7 +61,7 @@ test('browser registers over WSS and hears its own tone from the echo test (609)
 }) => {
   const a = await phone(browser, env('EXT_A'), env('PASS_A'), 440)
   await a.evaluate(() => window.mira.call('609'))
-  await a.waitForTimeout(4000)
+  await waitForMedia(a, `ext ${env('EXT_A')} (echo)`)
   await expectAudio(a, `ext ${env('EXT_A')} (echo)`, 440)
   await a.evaluate(() => window.mira.hangup())
   await a.evaluate(() => window.mira.stop())
@@ -57,7 +72,8 @@ test('two browsers call each other and each hears the other', async ({ browser }
   const a = await phone(browser, env('EXT_A'), env('PASS_A'), 440)
   await a.evaluate((t) => window.mira.call(t), env('EXT_B'))
   await b.evaluate(() => window.mira.waitForCall())
-  await a.waitForTimeout(4000)
+  await waitForMedia(a, `caller ${env('EXT_A')}`)
+  await waitForMedia(b, `callee ${env('EXT_B')}`)
   await expectAudio(a, `caller ${env('EXT_A')}`, 880)
   await expectAudio(b, `callee ${env('EXT_B')}`, 440)
   // caller hangs up: Asterisk must reach the callee's browser with a BYE (in-dialog routing to WSS)
